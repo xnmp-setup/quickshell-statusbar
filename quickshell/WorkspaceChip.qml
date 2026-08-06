@@ -1,7 +1,6 @@
+// Deliberately free of Quickshell imports: every environment dependency is an
+// injected property so behavioral tests can drive a real chip offscreen.
 import QtQuick
-import Quickshell
-import Quickshell.Hyprland
-import Quickshell.Widgets
 
 Rectangle {
     id: chip
@@ -10,11 +9,18 @@ Rectangle {
     required property string candidate
     required property var themeColors
     required property bool editing
+    // Live Hyprland workspace objects; empty offline/in tests.
+    property var hyprlandWorkspaces: []
+    // Side effects injected by the shell (Quickshell in production).
+    property var runCommand: function (command) {}
+    property var resolveIcon: function (name) { return ""; }
+    property string homeDir: ""
 
     readonly property bool segmented: candidate === "segmented"
-    readonly property var liveWorkspace: Hyprland.workspaces.values.find(
-        workspace => workspace.id === workspaceData.id
-    )
+    readonly property var liveWorkspace: hyprlandWorkspaces
+        && typeof hyprlandWorkspaces.find === "function"
+        ? hyprlandWorkspaces.find(workspace => workspace.id === workspaceData.id)
+        : undefined
     readonly property bool active: liveWorkspace ? liveWorkspace.active : workspaceData.active === true
     readonly property string displayName: workspaceData.name
     readonly property color accent: themeColors.accent
@@ -35,8 +41,8 @@ Rectangle {
     }
 
     function submitRename(name: string): void {
-        Quickshell.execDetached([
-            Quickshell.env("HOME") + "/.local/bin/rename-hypr-workspace",
+        runCommand([
+            homeDir + "/.local/bin/rename-hypr-workspace",
             String(chip.workspaceData.id),
             name
         ]);
@@ -162,12 +168,15 @@ Rectangle {
                         width: 18
                         height: 18
 
-                        IconImage {
+                        Image {
                             id: appIcon
                             anchors.fill: parent
                             source: modelData.icon.startsWith("file:")
                                 ? modelData.icon
-                                : Quickshell.iconPath(modelData.icon)
+                                : chip.resolveIcon(modelData.icon)
+                            sourceSize.width: 18
+                            sourceSize.height: 18
+                            fillMode: Image.PreserveAspectFit
                             visible: status === Image.Ready
                             mipmap: true
                         }
@@ -244,7 +253,7 @@ Rectangle {
                 chip.openRenameMenu();
                 return;
             }
-            Quickshell.execDetached([
+            chip.runCommand([
                 "hyprctl",
                 "dispatch",
                 "hl.dsp.focus({ workspace = " + chip.workspaceData.id + " })"

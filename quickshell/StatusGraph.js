@@ -1,5 +1,16 @@
 .pragma library
 
+// Per-hour consumption rate from cumulative percent samples taken every
+// sampleSeconds. Quota resets show up as negative deltas and clamp to zero.
+function deltaPerHour(values, sampleSeconds) {
+    const numbers = numericValues(values);
+    const scale = 3600 / sampleSeconds;
+    const result = [];
+    for (let index = 1; index < numbers.length; index += 1)
+        result.push(Math.max(0, numbers[index] - numbers[index - 1]) * scale);
+    return result;
+}
+
 // Trailing moving average. Non-numeric entries contribute nothing but keep
 // their slot so the smoothed series stays aligned with the raw one.
 function movingAverage(values, windowSize) {

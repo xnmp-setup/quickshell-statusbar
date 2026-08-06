@@ -7,14 +7,19 @@ ToolTip {
 
     required property var workspaceData
     required property var themeColors
-    // Pointer x in parent coordinates; negative keeps the default placement.
+    // Pointer x in parent coordinates. The popup maps under the pointer as it
+    // opens; anchorX freezes the open position because Wayland popups cannot
+    // rely on being movable after they are mapped.
     property real pointerX: -1
+    property real anchorX: -1
     readonly property color surfaceColor: themeColors.surface
 
-    x: pointerX >= 0
-        ? pointerX - width / 2
+    x: anchorX >= 0
+        ? anchorX - width / 2
         : parent ? (parent.width - width) / 2 : 0
     y: parent ? parent.height + 6 : 0
+
+    onAboutToShow: anchorX = pointerX
     readonly property int visibleClientCount: Math.min(workspaceData.clients.length, 8)
     readonly property string windowSummary: workspaceData.clients.length
         + (workspaceData.clients.length === 1 ? " window" : " windows")

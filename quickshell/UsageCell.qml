@@ -1,4 +1,5 @@
 import QtQuick
+import "StatusGraph.js" as StatusGraph
 
 Item {
     id: root
@@ -168,11 +169,33 @@ Item {
         id: hoverHandler
     }
 
+    // HoverHandler.point resets to zeroed values between events, so a
+    // no-button MouseArea supplies the continuously valid pointer position.
+    MouseArea {
+        id: pointerTracker
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+    }
+
     ThemedToolTip {
         visible: hoverHandler.hovered
         text: root.tooltipText()
         themeColors: root.themeColors
-        history: root.history
-        pointerX: hoverHandler.point.position.x
+        // Quota consumed and how fast it is being burned. Samples arrive
+        // every 30 seconds from the usage stream.
+        series: [
+            {
+                label: "BURN RATE · % PER HOUR",
+                values: StatusGraph.deltaPerHour(root.history, 30),
+                smoothed: true
+            },
+            {
+                label: "CUMULATIVE USED · %",
+                values: root.history,
+                smoothed: false
+            }
+        ]
+        pointerX: pointerTracker.mouseX
     }
 }

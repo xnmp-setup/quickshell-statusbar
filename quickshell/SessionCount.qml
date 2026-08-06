@@ -1,6 +1,4 @@
 import QtQuick
-import Quickshell
-import Quickshell.Widgets
 
 Item {
     id: root
@@ -22,7 +20,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 16
             height: 16
-            source: Quickshell.shellPath("assets/claude.png")
+            source: Qt.resolvedUrl("assets/claude.png")
             fillMode: Image.PreserveAspectFit
             mipmap: true
         }
@@ -32,7 +30,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 16
             height: 16
-            source: Quickshell.shellPath("assets/openai.svg")
+            source: Qt.resolvedUrl("assets/openai.svg")
             fillMode: Image.PreserveAspectFit
             mipmap: true
         }

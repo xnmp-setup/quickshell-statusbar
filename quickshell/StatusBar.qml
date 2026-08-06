@@ -14,11 +14,6 @@ PanelWindow {
     required property int renameRequestSerial
     property int editingWorkspaceId: 0
     property bool renameRequestsReady: false
-    // Stable id-keyed model: reassigning the Repeater's model destroys every
-    // chip (closing any open hover popup), so the id list only changes when
-    // membership or order actually changes; chip content updates in place.
-    property var monitorWorkspaceIds: []
-    property string monitorWorkspaceIdsJson: "[]"
     readonly property var themeColors: statusSource.themeColors
     readonly property bool editingWorkspaceExists: editingWorkspaceId === 0
         || statusSource.workspaces.some(workspace => workspace.id === editingWorkspaceId
@@ -67,31 +62,6 @@ PanelWindow {
         return value < 20 ? 2 : value < 40 ? 1 : 0;
     }
 
-    function workspaceById(workspaceId: int): var {
-        return statusSource.workspaces.find(
-            workspace => workspace.id === workspaceId && workspace.monitor === screen.name
-        ) || {
-            id: workspaceId,
-            name: String(workspaceId),
-            monitor: screen.name,
-            active: false,
-            clients: [],
-            claude: 0,
-            codex: 0
-        };
-    }
-
-    function syncMonitorWorkspaceIds(): void {
-        const ids = statusSource.workspaces
-            .filter(workspace => workspace.monitor === screen.name)
-            .map(workspace => workspace.id);
-        const encoded = JSON.stringify(ids);
-        if (encoded !== monitorWorkspaceIdsJson) {
-            monitorWorkspaceIdsJson = encoded;
-            monitorWorkspaceIds = ids;
-        }
-    }
-
     function beginFocusedWorkspaceRename(): void {
         const focusedWorkspace = Hyprland.focusedWorkspace;
         if (!focusedWorkspace)
@@ -113,17 +83,7 @@ PanelWindow {
             beginFocusedWorkspaceRename();
     }
 
-    Component.onCompleted: {
-        renameRequestsReady = true;
-        syncMonitorWorkspaceIds();
-    }
-
-    Connections {
-        target: bar.statusSource
-        function onWorkspacesChanged(): void {
-            bar.syncMonitorWorkspaceIds();
-        }
-    }
+    Component.onCompleted: renameRequestsReady = true
 
     visible: barVisible
     implicitHeight: 40
@@ -170,38 +130,26 @@ PanelWindow {
         }
         clip: true
 
-        RowLayout {
-            id: workspaces
+        WorkspaceStrip {
             anchors {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
             }
-            spacing: 8
-
-            Repeater {
-                model: bar.monitorWorkspaceIds
-
-                WorkspaceChip {
-                    required property var modelData
-                    // String dedupe: the chip only re-reads its workspace when
-                    // that workspace's own content changed, so unrelated
-                    // snapshot churn cannot rebuild rows in an open tooltip.
-                    readonly property string workspaceJson: JSON.stringify(
-                        bar.workspaceById(modelData)
-                    )
-
-                    workspaceData: JSON.parse(workspaceJson)
-                    candidate: bar.candidate
-                    themeColors: bar.themeColors
-                    editing: bar.editingWorkspaceId === modelData.id
-                    onRenameStarted: workspaceId => {
-                        bar.editingWorkspaceId = workspaceId;
-                    }
-                    onRenameFinished: {
-                        if (bar.editingWorkspaceId === modelData.id)
-                            bar.editingWorkspaceId = 0;
-                    }
-                }
+            workspaces: bar.statusSource.workspaces
+            screenName: bar.screen.name
+            candidate: bar.candidate
+            themeColors: bar.themeColors
+            editingWorkspaceId: bar.editingWorkspaceId
+            hyprlandWorkspaces: Hyprland.workspaces.values
+            homeDir: Quickshell.env("HOME")
+            runCommand: command => Quickshell.execDetached(command)
+            resolveIcon: name => Quickshell.iconPath(name)
+            onRenameStarted: workspaceId => {
+                bar.editingWorkspaceId = workspaceId;
+            }
+            onRenameFinished: workspaceId => {
+                if (bar.editingWorkspaceId === workspaceId)
+                    bar.editingWorkspaceId = 0;
             }
         }
     }

@@ -120,12 +120,21 @@ Item {
         id: hoverHandler
     }
 
+    // HoverHandler.point resets to zeroed values between events, so a
+    // no-button MouseArea supplies the continuously valid pointer position.
+    MouseArea {
+        id: pointerTracker
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+    }
+
     ThemedToolTip {
         visible: hoverHandler.hovered && root.tooltip.length > 0
         text: root.tooltip
         themeColors: root.themeColors
         history: root.history
         smoothed: root.smoothHistory
-        pointerX: hoverHandler.point.position.x
+        pointerX: pointerTracker.mouseX
     }
 }

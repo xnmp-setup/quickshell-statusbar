@@ -317,6 +317,167 @@ TestCase {
         compare(StatusIcons.batteryIcon(97, "full"), "\u{f0079}");
     }
 
+    Component {
+        id: stripComponent
+
+        WorkspaceStrip {
+            screenName: "DP-1"
+            candidate: "segmented"
+            themeColors: testCase.themeColors
+            workspaces: [
+                {
+                    id: 4,
+                    name: "Deep work",
+                    monitor: "DP-1",
+                    active: true,
+                    claude: 1,
+                    codex: 0,
+                    clients: [{
+                        address: "0xa", class: "wezterm", icon: "terminal",
+                        label: "WezTerm", title: "chezmoi", terminal: true,
+                        tabs: 2, claude: 1, codex: 0, activities: []
+                    }]
+                },
+                {
+                    id: 7,
+                    name: "Mail",
+                    monitor: "DP-1",
+                    active: false,
+                    claude: 0,
+                    codex: 0,
+                    clients: [{
+                        address: "0xb", class: "chrome", icon: "chrome",
+                        label: "Chrome", title: "Inbox", terminal: false,
+                        tabs: 1, claude: 0, codex: 0, activities: []
+                    }]
+                },
+                {
+                    id: 9,
+                    name: "Other screen",
+                    monitor: "DP-2",
+                    active: false,
+                    claude: 0,
+                    codex: 0,
+                    clients: [{
+                        address: "0xc", class: "zed", icon: "zed",
+                        label: "Zed", title: "notes", terminal: false,
+                        tabs: 1, claude: 0, codex: 0, activities: []
+                    }]
+                }
+            ]
+        }
+    }
+
+    function test_strip_shows_only_this_screens_workspaces(): void {
+        const strip = createTemporaryObject(stripComponent, this);
+        verify(strip !== null);
+        compare(strip.monitorWorkspaceIds.length, 2);
+        compare(strip.chipAt(0).workspaceData.id, 4);
+        compare(strip.chipAt(1).workspaceData.id, 7);
+        compare(strip.chipAt(2), null);
+    }
+
+    function test_rename_flow_targets_the_hovered_chip(): void {
+        const strip = createTemporaryObject(stripComponent, this, {
+            homeDir: "/home/test"
+        });
+        verify(strip !== null);
+        const commands = [];
+        strip.runCommand = command => commands.push(command);
+        let startedId = -1;
+        let finishedId = -1;
+        strip.renameStarted.connect(workspaceId => startedId = workspaceId);
+        strip.renameFinished.connect(workspaceId => finishedId = workspaceId);
+
+        const chip = strip.chipAt(1);
+        chip.beginRename();
+        compare(startedId, 7);
+
+        strip.editingWorkspaceId = 7;
+        compare(strip.chipAt(1).editing, true);
+        compare(strip.chipAt(0).editing, false);
+
+        chip.submitRename("focus");
+        compare(finishedId, 7);
+        compare(commands.length, 1);
+        compare(commands[0][0], "/home/test/.local/bin/rename-hypr-workspace");
+        compare(commands[0][1], "7");
+        compare(commands[0][2], "focus");
+    }
+
+    function test_snapshot_churn_keeps_chip_instances_and_updates_data(): void {
+        const strip = createTemporaryObject(stripComponent, this);
+        verify(strip !== null);
+        const originalChip = strip.chipAt(0);
+        const untouchedData = strip.chipAt(1).workspaceData;
+
+        const updated = JSON.parse(JSON.stringify(strip.workspaces));
+        updated[0].clients[0].title = "statusbar";
+        strip.workspaces = updated;
+
+        verify(strip.chipAt(0) === originalChip);
+        compare(strip.chipAt(0).workspaceData.clients[0].title, "statusbar");
+        verify(strip.chipAt(1).workspaceData === untouchedData);
+    }
+
+    function test_membership_change_rebuilds_only_the_id_model(): void {
+        const strip = createTemporaryObject(stripComponent, this);
+        verify(strip !== null);
+        const shrunk = strip.workspaces.filter(workspace => workspace.id !== 7);
+        strip.workspaces = shrunk;
+        compare(strip.monitorWorkspaceIds.length, 1);
+        compare(strip.chipAt(0).workspaceData.id, 4);
+        compare(strip.chipAt(1), null);
+    }
+
+    function test_usage_burn_rate_derives_from_cumulative_samples(): void {
+        compare(StatusGraph.deltaPerHour([], 30), []);
+        compare(StatusGraph.deltaPerHour([40], 30), []);
+        // 30-second cadence: +1% per sample is 120%/hour; resets clamp to 0.
+        compare(StatusGraph.deltaPerHour([40, 41, 41, 3], 30), [120, 0, 0]);
+        compare(StatusGraph.deltaPerHour([10, null, 12, "junk", 13], 30), [240, 120]);
+    }
+
+    function test_tooltip_series_replace_the_single_history_graph(): void {
+        const single = createTemporaryObject(themedTooltipComponent, this, {
+            history: [1, 2, 3]
+        });
+        const multi = createTemporaryObject(themedTooltipComponent, this, {
+            history: [1, 2, 3],
+            series: [
+                { label: "RATE", values: [0, 120, 60], smoothed: true },
+                { label: "TOTAL", values: [40, 41], smoothed: false },
+                { label: "EMPTY", values: [7], smoothed: false }
+            ]
+        });
+        verify(single !== null);
+        verify(multi !== null);
+        compare(single.normalizedSeries.length, 1);
+        compare(single.normalizedSeries[0].label, "");
+        compare(multi.normalizedSeries.length, 2);
+        compare(multi.normalizedSeries[0].label, "RATE");
+        compare(multi.normalizedSeries[0].smoothed, true);
+        compare(multi.normalizedSeries[1].label, "TOTAL");
+        compare(multi.showsGraph, true);
+    }
+
+    function test_tooltip_opens_anchored_under_the_pointer(): void {
+        const tip = createTemporaryObject(themedTooltipComponent, this, {
+            pointerX: 70
+        });
+        verify(tip !== null);
+        compare(tip.anchorX, -1);
+        tip.open();
+        tryCompare(tip, "opened", true);
+        compare(tip.anchorX, 70);
+        tip.close();
+        tryCompare(tip, "visible", false);
+        tip.pointerX = 20;
+        tip.open();
+        tryCompare(tip, "opened", true);
+        compare(tip.anchorX, 20);
+    }
+
     function test_numeric_column_does_not_move_with_digit_count(): void {
         const oneDigit = metricAt(5);
         const twoDigits = metricAt(55);
