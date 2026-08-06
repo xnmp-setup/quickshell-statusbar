@@ -7,15 +7,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
-import subprocess
 import sys
 import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).parents[1] / "dot_local/lib/hypr_status_stream.py"
+MODULE_PATH = Path(__file__).parents[1] / "lib/hypr_status_stream.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
 import ghostty_status as ghostty
 
@@ -614,39 +612,6 @@ class WorkspaceTest(unittest.TestCase):
     def test_malformed_json_is_an_empty_collection(self) -> None:
         self.assertEqual(status.parse_json_array("null"), [])
         self.assertEqual(status.parse_json_array("not json"), [])
-
-
-class AgentHookStateTest(unittest.TestCase):
-    def test_wezterm_hook_publishes_namespaced_state_atomically(self) -> None:
-        script = Path(__file__).parents[1] / "dot_local/bin/executable_wezterm-agent-status"
-        with tempfile.TemporaryDirectory() as directory:
-            environment = dict(os.environ)
-            environment.pop("CLAUDECODE", None)
-            environment.pop("CLAUDE_PID", None)
-            environment.update(
-                {
-                    "TERM_PROGRAM": "WezTerm",
-                    "WEZTERM_PANE": "7",
-                    "WEZTERM_UNIX_SOCKET": "/run/user/1000/wezterm/gui-sock-42",
-                    "WEZTERM_EXECUTABLE": "/bin/false-gui",
-                    "XDG_RUNTIME_DIR": directory,
-                }
-            )
-            path = Path(directory) / "wezterm-agent-state.gui-sock-42.7.codex"
-            for state in ("working", "attention", "done"):
-                completed = subprocess.run(
-                    ["/bin/sh", str(script), state],
-                    input="{}",
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    env=environment,
-                    timeout=5,
-                )
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                self.assertEqual(path.read_text(), state + "\n")
-                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-
 
 if __name__ == "__main__":
     unittest.main()

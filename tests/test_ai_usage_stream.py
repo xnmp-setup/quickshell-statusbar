@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).parents[1] / "dot_local/lib/ai_usage_stream.py"
+MODULE_PATH = Path(__file__).parents[1] / "lib/ai_usage_stream.py"
 SPEC = importlib.util.spec_from_file_location("ai_usage_stream", MODULE_PATH)
 assert SPEC and SPEC.loader
 usage = importlib.util.module_from_spec(SPEC)

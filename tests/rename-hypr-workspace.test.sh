@@ -44,7 +44,7 @@ run_rename() {
     TEST_HYPRCTL_FAIL="${TEST_HYPRCTL_FAIL:-0}" \
     XDG_RUNTIME_DIR="$test_root/runtime" \
     PATH="$test_root/bin:$PATH" \
-    bash "$repo_root/dot_local/bin/executable_rename-hypr-workspace" "$@"
+    bash "$repo_root/bin/rename-hypr-workspace" "$@"
 }
 
 : > "$test_root/hyprctl.log"

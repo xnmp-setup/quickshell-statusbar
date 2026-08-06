@@ -1,11 +1,11 @@
 import QtQuick
 import QtQuick.Controls
 import QtTest
-import "../dot_config/quickshell/statusbar"
-import "../dot_config/quickshell/statusbar/StatusLayout.js" as StatusLayout
-import "../dot_config/quickshell/statusbar/StatusSanitizer.js" as Sanitizer
-import "../dot_config/quickshell/statusbar/StatusGraph.js" as StatusGraph
-import "../dot_config/quickshell/statusbar/StatusIcons.js" as StatusIcons
+import "../quickshell"
+import "../quickshell/StatusLayout.js" as StatusLayout
+import "../quickshell/StatusSanitizer.js" as Sanitizer
+import "../quickshell/StatusGraph.js" as StatusGraph
+import "../quickshell/StatusIcons.js" as StatusIcons
 
 TestCase {
     id: testCase
