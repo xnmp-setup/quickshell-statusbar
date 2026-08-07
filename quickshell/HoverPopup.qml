@@ -29,9 +29,10 @@ PopupWindow {
     // Whether the hint is currently on screen. Distinct from `visible` so it
     // reads the same whether the popup is a real window or a test double.
     readonly property bool opened: shown && ready && hostItem !== null
-    readonly property real anchorX: pointerX >= 0
-        ? pointerX
-        : hostItem ? hostItem.width / 2 : 0
+    // Where the hint hangs, frozen at the point the pointer first reached the
+    // host: a hint that slid along under the cursor would be restless to read.
+    property real anchorX: 0
+    property bool anchored: false
     default property alias content: contentHolder.data
 
     function reveal(): void {
@@ -41,12 +42,29 @@ PopupWindow {
             openTimer.restart();
     }
 
+    // The pointer position can land after the hover does, so the anchor keeps
+    // following until the first real reading and then holds it.
+    function captureAnchor(): void {
+        if (!shown || anchored)
+            return;
+        if (pointerX >= 0) {
+            anchorX = pointerX;
+            anchored = true;
+        } else {
+            anchorX = hostItem ? hostItem.width / 2 : 0;
+        }
+    }
+
+    onPointerXChanged: captureAnchor()
     onShownChanged: {
         if (shown) {
+            anchored = false;
+            captureAnchor();
             reveal();
         } else {
             openTimer.stop();
             ready = false;
+            anchored = false;
         }
     }
 

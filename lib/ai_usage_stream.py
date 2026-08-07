@@ -355,10 +355,15 @@ def prune_samples(
 
     Without that carried-over sample a series whose value has not changed for
     hours would have nothing to draw at the start of the window.
+
+    Samples dated after `now` are discarded: nothing can be measured in the
+    future, and keeping one would wedge the series forever, since every real
+    reading that followed would look older than the newest sample on file.
     """
     cutoff = now - span
-    inside = [sample for sample in samples if (sample[0] or 0) >= cutoff]
-    outside = [sample for sample in samples if (sample[0] or 0) < cutoff]
+    dated = [sample for sample in samples if (sample[0] or 0) <= now]
+    inside = [sample for sample in dated if (sample[0] or 0) >= cutoff]
+    outside = [sample for sample in dated if (sample[0] or 0) < cutoff]
     kept = ([outside[-1]] if outside else []) + inside
     return kept[-MAX_HISTORY_SAMPLES:]
 

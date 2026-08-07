@@ -487,23 +487,42 @@ TestCase {
         compare(multi.showsGraph, true);
     }
 
-    function test_tooltip_anchor_tracks_the_pointer(): void {
+    function test_tooltip_anchors_where_the_pointer_arrived(): void {
         const tip = createTemporaryObject(themedTooltipComponent, this, {
             pointerX: 70
         });
         verify(tip !== null);
-        compare(tip.anchor.rect.x, 70);
-        // The anchor follows the pointer instead of freezing where the hint
-        // was first shown, so the hint stays under the cursor.
-        tip.pointerX = 20;
-        compare(tip.anchor.rect.x, 20);
-        // Without a pointer reading there is nothing to anchor to.
-        tip.pointerX = -1;
-        compare(tip.anchorX, 0);
-        // A hint with nothing to hang from never shows.
         tip.shown = true;
+        compare(tip.anchor.rect.x, 70);
+        // Moving within the host does not drag the hint along behind the
+        // cursor; it stays where the pointer first arrived.
+        tip.pointerX = 20;
+        compare(tip.anchor.rect.x, 70);
+        // The next hover anchors afresh.
+        tip.shown = false;
+        tip.shown = true;
+        compare(tip.anchor.rect.x, 20);
+        // A hint with nothing to hang from never shows.
         wait(150);
         compare(tip.opened, false);
+    }
+
+    function test_tooltip_anchor_waits_for_a_pointer_reading(): void {
+        const cell = createTemporaryObject(metricComponent, this, {
+            value: 42,
+            tooltip: "Total CPU use"
+        });
+        verify(cell !== null);
+        const tip = tooltipOf(cell);
+        // Hover can be reported before the pointer position is, so until one
+        // arrives the hint centres on the cell rather than jumping to its edge.
+        cell.hoverActive = true;
+        compare(tip.anchorX, cell.width / 2);
+        cell.hoverX = 12;
+        compare(tip.anchorX, 12);
+        // And that first reading is the one it keeps.
+        cell.hoverX = 80;
+        compare(tip.anchorX, 12);
     }
 
     function tooltipOf(item: var): var {

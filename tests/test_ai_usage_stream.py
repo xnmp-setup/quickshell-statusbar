@@ -223,8 +223,19 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(samples[-1], [NOW + 401, 41, None])
         # A reading with no percentage is not a data point.
         self.assertEqual(usage.append_sample(samples, {"percent": None}, NOW + 500), samples)
-        # Timestamps never go backwards, whatever the clock says.
-        self.assertEqual(usage.append_sample(samples, {"percent": 90}, NOW + 1), samples)
+        # If the clock rewinds, the readings now sitting in the future are
+        # dropped and recording continues from the corrected time.
+        self.assertEqual(
+            usage.append_sample(samples, {"percent": 90}, NOW + 1),
+            [[NOW, 40, None], [NOW + 1, 90, None]],
+        )
+
+    def test_future_dated_samples_never_wedge_the_series(self) -> None:
+        # A clock jump or a stale file can leave readings dated ahead of now.
+        # They must not survive, or every later reading looks like the past.
+        samples: list[usage.Sample] = [[NOW + 86_400, 90, None]]
+        samples = usage.append_sample(samples, {"percent": 40}, NOW)
+        self.assertEqual(samples, [[NOW, 40, None]])
 
     def test_corrupt_history_is_discarded_rather_than_plotted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
