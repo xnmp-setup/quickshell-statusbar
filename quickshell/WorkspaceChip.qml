@@ -1,6 +1,7 @@
 // Deliberately free of Quickshell imports: every environment dependency is an
 // injected property so behavioral tests can drive a real chip offscreen.
 import QtQuick
+import "StatusCommands.js" as StatusCommands
 
 Rectangle {
     id: chip
@@ -45,11 +46,9 @@ Rectangle {
     }
 
     function submitRename(name: string): void {
-        runCommand([
-            homeDir + "/.local/bin/rename-hypr-workspace",
-            String(chip.workspaceData.id),
-            name
-        ]);
+        runCommand(StatusCommands.renameWorkspaceCommand(
+            homeDir, chip.workspaceData.id, name
+        ));
         renameFinished();
     }
 
@@ -257,11 +256,9 @@ Rectangle {
                 chip.openRenameMenu();
                 return;
             }
-            chip.runCommand([
-                "hyprctl",
-                "dispatch",
-                "hl.dsp.focus({ workspace = " + chip.workspaceData.id + " })"
-            ]);
+            chip.runCommand(
+                StatusCommands.focusWorkspaceCommand(chip.workspaceData.id)
+            );
         }
     }
 

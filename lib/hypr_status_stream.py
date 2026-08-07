@@ -10,10 +10,9 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -27,9 +26,15 @@ from ghostty_status import (
     is_ghostty_class,
     strip_invisible_metadata,
 )
+from stream_kit import (
+    CommandRunner,
+    JsonObject,
+    ThrottledValue,
+    TrailingWindow,
+    run_command,
+    run_stream,
+)
 
-JsonObject = dict[str, Any]
-CommandRunner = Callable[[Sequence[str]], str]
 PathReader = Callable[[Path], str]
 
 
@@ -420,6 +425,9 @@ def normalize_tty(tty: str) -> str:
     return tty if tty.startswith("/dev/") else f"/dev/{tty}"
 
 
+# Deliberately not stream_kit.bounded_integer: hyprctl/wezterm emit ids as JSON
+# strings often enough that they must coerce, while a float id (or a bool) is a
+# schema violation to reject. The toolkit helper has the opposite polarity.
 def positive_integer(value: object) -> int | None:
     if isinstance(value, (bool, float)):
         return None
@@ -493,6 +501,35 @@ def agent_counts_by_tty(processes: Iterable[AgentProcess]) -> dict[str, dict[str
     return dict(counts)
 
 
+def wezterm_pane_activities(
+    pane: Mapping[str, Any],
+    counts: Mapping[str, int],
+    budget: int,
+    *,
+    runtime_root: Path | None,
+    state_reader: PathReader | None,
+) -> list[JsonObject]:
+    """One activity per agent running in the pane, or one for a bare shell."""
+    title = pane.get("title") or pane.get("window_title")
+    activities: list[JsonObject] = []
+    for kind, count in counts.items():
+        for _ in range(min(count, budget - len(activities))):
+            activities.append(
+                {
+                    "kind": kind,
+                    "state": wezterm_agent_state(
+                        pane, kind, runtime_root, state_reader
+                    ),
+                    "title": activity_title(title, kind),
+                }
+            )
+    if not any(counts.values()) and budget > 0:
+        activities.append(
+            {"kind": "process", "state": "", "title": activity_title(title)}
+        )
+    return activities
+
+
 def wezterm_windows(
     rows: Sequence[Mapping[str, Any]],
     tty_counts: Mapping[str, Mapping[str, int]],
@@ -518,33 +555,21 @@ def wezterm_windows(
                 if isinstance(value, str) and value:
                     titles.add(title_body(value))
             pane_counts = tty_counts.get(str(pane.get("tty_name", "")), {})
-            pane_has_agent = False
-            for kind in counts:
-                count = nonnegative_integer(pane_counts.get(kind, 0)) or 0
+            pane_agents = {
+                kind: nonnegative_integer(pane_counts.get(kind, 0)) or 0
+                for kind in counts
+            }
+            for kind, count in pane_agents.items():
                 counts[kind] += count
-                for _ in range(min(count, MAX_ACTIVITIES_PER_CLIENT - len(activities))):
-                    pane_has_agent = True
-                    activities.append(
-                        {
-                            "kind": kind,
-                            "state": wezterm_agent_state(
-                                pane, kind, runtime_root, state_reader
-                            ),
-                            "title": activity_title(
-                                pane.get("title") or pane.get("window_title"), kind
-                            ),
-                        }
-                    )
-            if not pane_has_agent and len(activities) < MAX_ACTIVITIES_PER_CLIENT:
-                activities.append(
-                    {
-                        "kind": "process",
-                        "state": "",
-                        "title": activity_title(
-                            pane.get("title") or pane.get("window_title")
-                        ),
-                    }
+            activities.extend(
+                wezterm_pane_activities(
+                    pane,
+                    pane_agents,
+                    MAX_ACTIVITIES_PER_CLIENT - len(activities),
+                    runtime_root=runtime_root,
+                    state_reader=state_reader,
                 )
+            )
         result.append(
             {
                 "guiPid": gui_pid,
@@ -791,6 +816,111 @@ def is_terminal_class(app_class: str) -> bool:
     return is_wezterm_class(normalized) or is_ghostty_class(normalized)
 
 
+def apply_agent_counts(
+    app: Mapping[str, Any], source: Mapping[str, Any]
+) -> JsonObject:
+    """Tab and agent fields copied from a matched mux window or a stale client."""
+    fields: JsonObject = {
+        field: int(source.get(field, app.get(field, 0)))
+        for field in ("tabs", "claude", "codex")
+    }
+    fields["activities"] = list(source.get("activities", []))[
+        :MAX_ACTIVITIES_PER_CLIENT
+    ]
+    return fields
+
+
+def ghostty_agent_counts(window: GhosttyWindow) -> JsonObject:
+    """The same fields as `apply_agent_counts`, read off a Ghostty window value."""
+    fields: JsonObject = {
+        field: int(getattr(window, field)) for field in ("tabs", "claude", "codex")
+    }
+    fields["activities"] = [
+        {"kind": activity.kind, "state": activity.state, "title": activity.title}
+        for activity in window.activities[:MAX_ACTIVITIES_PER_CLIENT]
+    ]
+    return fields
+
+
+def terminal_fields(
+    client: Mapping[str, Any],
+    app: Mapping[str, Any],
+    *,
+    wezterm: Mapping[str, Any] | None,
+    ghostty: GhosttyWindow | None,
+    stale: Mapping[str, Any] | None,
+) -> JsonObject:
+    """Agent fields for a terminal client: live mux window, else stale, else title.
+
+    Non-terminal clients and unmatched Ghostty windows with no history keep the
+    defaults already on `app`, so this returns nothing to merge for them.
+    """
+    app_class = str(client.get("class", ""))
+    if is_wezterm_class(app_class):
+        if wezterm:
+            fields = apply_agent_counts(app, wezterm)
+            fields["weztermWindowId"] = int(wezterm["windowId"])
+            gui_pid = positive_integer(wezterm.get("guiPid"))
+            if gui_pid is not None:
+                fields["weztermGuiPid"] = gui_pid
+            return fields
+        if stale:
+            return apply_agent_counts(app, stale)
+        return {"tabs": parse_tab_count(str(client.get("title", "")))}
+    if is_ghostty_class(app_class):
+        if ghostty:
+            fields = ghostty_agent_counts(ghostty)
+            fields["ghosttyWindowId"] = ghostty.identity
+            return fields
+        if stale:
+            return apply_agent_counts(app, stale)
+    return {}
+
+
+def client_entry(client: Mapping[str, Any]) -> JsonObject:
+    """The presentation fields every client carries, before agent enrichment."""
+    app_class = str(client.get("class", ""))
+    return {
+        "address": str(client.get("address", "")),
+        "class": app_class,
+        "icon": icon_for(app_class),
+        "terminal": is_terminal_class(app_class),
+        "label": app_label(app_class),
+        "title": client_title(client, app_class),
+        "tabs": 1,
+        "claude": 0,
+        "codex": 0,
+        "activities": [],
+    }
+
+
+def workspace_placement(
+    client: Mapping[str, Any], monitor_names: Mapping[Any, Any]
+) -> tuple[tuple[int, str], str] | None:
+    """The (id, monitor) key and display name for a client, or None if unplaced."""
+    workspace = client.get("workspace") or {}
+    try:
+        workspace_id = int(workspace.get("id", 0))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if workspace_id <= 0 or not client.get("mapped", True):
+        return None
+    monitor_name = str(monitor_names.get(client.get("monitor"), ""))
+    return (workspace_id, monitor_name), str(workspace.get("name") or workspace_id)
+
+
+def previous_client_index(
+    previous: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    """Last snapshot's clients by address, the fallback for a dropped mux query."""
+    return {
+        str(client.get("address", "")): client
+        for workspace in previous
+        for client in workspace.get("clients", [])
+        if isinstance(client, Mapping)
+    }
+
+
 def build_workspaces(
     clients: Sequence[Mapping[str, Any]],
     monitors: Sequence[Mapping[str, Any]],
@@ -799,106 +929,48 @@ def build_workspaces(
     ghostty: Sequence[GhosttyWindow] = (),
 ) -> list[JsonObject]:
     monitor_names = {monitor.get("id"): monitor.get("name", "") for monitor in monitors}
-    previous_clients = {
-        str(client.get("address", "")): client
-        for workspace in previous
-        for client in workspace.get("clients", [])
-        if isinstance(client, Mapping)
-    }
-    wezterm_clients = [
-        client for client in clients if is_wezterm_class(str(client.get("class", "")))
-    ]
-    matched_wezterm = assign_wezterm_windows(wezterm_clients, wezterm, previous_clients)
-    ghostty_clients = [
-        client for client in clients if is_ghostty_class(str(client.get("class", "")))
-    ]
-    matched_ghostty = assign_ghostty_windows(ghostty_clients, ghostty, previous_clients)
+    previous_clients = previous_client_index(previous)
+    matched_wezterm = assign_wezterm_windows(
+        [client for client in clients if is_wezterm_class(str(client.get("class", "")))],
+        wezterm,
+        previous_clients,
+    )
+    matched_ghostty = assign_ghostty_windows(
+        [client for client in clients if is_ghostty_class(str(client.get("class", "")))],
+        ghostty,
+        previous_clients,
+    )
     grouped: dict[tuple[int, str], list[JsonObject]] = defaultdict(list)
     workspace_names: dict[tuple[int, str], str] = {}
     for client in clients:
-        workspace = client.get("workspace") or {}
-        try:
-            workspace_id = int(workspace.get("id", 0))
-        except (TypeError, ValueError):
+        placement = workspace_placement(client, monitor_names)
+        if placement is None:
             continue
-        if workspace_id <= 0 or not client.get("mapped", True):
-            continue
-        monitor_name = str(monitor_names.get(client.get("monitor"), ""))
-        workspace_key = (workspace_id, monitor_name)
-        workspace_name = str(workspace.get("name") or workspace_id)
+        workspace_key, workspace_name = placement
         workspace_names.setdefault(workspace_key, workspace_name)
-        app_class = str(client.get("class", ""))
-        app: JsonObject = {
-            "address": str(client.get("address", "")),
-            "class": app_class,
-            "icon": icon_for(app_class),
-            "terminal": is_terminal_class(app_class),
-            "label": app_label(app_class),
-            "title": client_title(client, app_class),
-            "tabs": 1,
-            "claude": 0,
-            "codex": 0,
-            "activities": [],
-        }
-        if is_wezterm_class(app_class):
-            matched = matched_wezterm.get(app["address"])
-            if matched:
-                for field in ("tabs", "claude", "codex"):
-                    app[field] = int(matched.get(field, app[field]))
-                app["weztermWindowId"] = int(matched["windowId"])
-                app["activities"] = list(matched.get("activities", []))[
-                    :MAX_ACTIVITIES_PER_CLIENT
-                ]
-                gui_pid = positive_integer(matched.get("guiPid"))
-                if gui_pid is not None:
-                    app["weztermGuiPid"] = gui_pid
-            else:
-                stale = previous_clients.get(app["address"])
-                if stale:
-                    for field in ("tabs", "claude", "codex"):
-                        app[field] = int(stale.get(field, app[field]))
-                    app["activities"] = list(stale.get("activities", []))[
-                        :MAX_ACTIVITIES_PER_CLIENT
-                    ]
-                else:
-                    app["tabs"] = parse_tab_count(str(client.get("title", "")))
-        elif is_ghostty_class(app_class):
-            ghostty_window = matched_ghostty.get(app["address"])
-            if ghostty_window:
-                for field in ("tabs", "claude", "codex"):
-                    app[field] = int(getattr(ghostty_window, field))
-                app["activities"] = [
-                    {
-                        "kind": activity.kind,
-                        "state": activity.state,
-                        "title": activity.title,
-                    }
-                    for activity in ghostty_window.activities[:MAX_ACTIVITIES_PER_CLIENT]
-                ]
-                app["ghosttyWindowId"] = ghostty_window.identity
-            else:
-                stale = previous_clients.get(app["address"])
-                if stale:
-                    for field in ("tabs", "claude", "codex"):
-                        app[field] = int(stale.get(field, app[field]))
-                    app["activities"] = list(stale.get("activities", []))[
-                        :MAX_ACTIVITIES_PER_CLIENT
-                    ]
+        app = client_entry(client)
+        app.update(
+            terminal_fields(
+                client,
+                app,
+                wezterm=matched_wezterm.get(app["address"]),
+                ghostty=matched_ghostty.get(app["address"]),
+                stale=previous_clients.get(app["address"]),
+            )
+        )
         grouped[workspace_key].append(app)
 
-    result: list[JsonObject] = []
-    for (workspace_id, monitor_name), apps in sorted(grouped.items()):
-        result.append(
-            {
-                "id": workspace_id,
-                "name": workspace_names[(workspace_id, monitor_name)],
-                "monitor": monitor_name,
-                "clients": apps,
-                "claude": sum(app["claude"] for app in apps),
-                "codex": sum(app["codex"] for app in apps),
-            }
-        )
-    return result
+    return [
+        {
+            "id": workspace_id,
+            "name": workspace_names[(workspace_id, monitor_name)],
+            "monitor": monitor_name,
+            "clients": apps,
+            "claude": sum(app["claude"] for app in apps),
+            "codex": sum(app["codex"] for app in apps),
+        }
+        for (workspace_id, monitor_name), apps in sorted(grouped.items())
+    ]
 
 
 def try_parse_json_array(text: str) -> list[Mapping[str, Any]] | None:
@@ -913,13 +985,16 @@ def parse_json_array(text: str) -> list[Mapping[str, Any]]:
     return try_parse_json_array(text) or []
 
 
-def run_command(command: Sequence[str]) -> str:
-    try:
-        return subprocess.run(
-            command, check=False, capture_output=True, text=True, timeout=0.8
-        ).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
+def battery_tooltip(battery: BatteryStatus) -> str:
+    return (
+        f"Battery {battery.state.casefold()}"
+        if battery.state
+        else "Battery status unavailable"
+    )
+
+
+def wifi_tooltip(wifi: WifiStatus) -> str:
+    return f"{wifi.ssid} · {wifi.device}" if wifi.connected else "Wi-Fi disconnected"
 
 
 class StatusCollector:
@@ -940,11 +1015,16 @@ class StatusCollector:
         self.theme_path = theme_path or Path.home() / ".config/hypr/theme-colors.lua"
         self.runtime_root = runtime_root or default_runtime_root()
         self.previous_cpu: CpuTimes | None = None
-        self.disk_history: deque[DiskSample] = deque()
-        self.cached_workspaces: list[JsonObject] = []
-        self.workspace_sample_at = float("-inf")
-        self.cached_wifi = WifiStatus(False, "", None, "")
-        self.wifi_sample_at = float("-inf")
+        self.disk_history: TrailingWindow[DiskSample] = TrailingWindow(30.0)
+        # Workspace and wifi refreshes shell out; they are sampled far less often
+        # than the 1 Hz snapshot. A failed workspace read retries immediately so a
+        # single dropped hyprctl reply does not freeze the bar for a whole second.
+        self.workspaces = ThrottledValue(
+            self._refresh_workspaces, 1.0, initial=[], retry_failed=True
+        )
+        self.wifi = ThrottledValue(
+            self._refresh_wifi, 5.0, initial=WifiStatus(False, "", None, "")
+        )
         self.ghostty_discovery = GhosttyDiscovery(runner)
 
     def _read(self, path: Path) -> str:
@@ -1071,10 +1151,8 @@ class StatusCollector:
         ]
         return summarize_batteries(rows)
 
-    def _wifi(self, now: float) -> WifiStatus:
-        if now - self.wifi_sample_at < 5.0:
-            return self.cached_wifi
-        self.cached_wifi = parse_wifi_status(
+    def _refresh_wifi(self) -> WifiStatus:
+        return parse_wifi_status(
             self.runner(
                 [
                     "nmcli",
@@ -1091,19 +1169,15 @@ class StatusCollector:
                 ]
             )
         )
-        self.wifi_sample_at = now
-        return self.cached_wifi
 
-    def _workspaces(self, now: float) -> list[JsonObject]:
-        if now - self.workspace_sample_at < 1.0:
-            return self.cached_workspaces
+    def _refresh_workspaces(self) -> list[JsonObject] | None:
         clients = try_parse_json_array(self.runner(["hyprctl", "-j", "clients"]))
         monitors = try_parse_json_array(self.runner(["hyprctl", "-j", "monitors"]))
         if clients is None or monitors is None:
-            return self.cached_workspaces
+            return None
         rows = query_wezterm_rows(clients, self.runtime_root, self.runner)
         tty_counts = agent_counts_by_tty(self._agent_processes())
-        self.cached_workspaces = build_workspaces(
+        return build_workspaces(
             clients,
             monitors,
             wezterm_windows(
@@ -1112,11 +1186,9 @@ class StatusCollector:
                 runtime_root=self.runtime_root,
                 state_reader=self._read,
             ),
-            previous=self.cached_workspaces,
+            previous=self.workspaces.value,
             ghostty=self.ghostty_discovery.windows(clients),
         )
-        self.workspace_sample_at = now
-        return self.cached_workspaces
 
     def snapshot(self) -> JsonObject:
         now = self.clock()
@@ -1130,28 +1202,20 @@ class StatusCollector:
                 self._read(self.proc_root / "diskstats"), self._physical_disks()
             ),
         )
-        self.disk_history.append(disk_sample)
-        while len(self.disk_history) > 1 and self.disk_history[1].timestamp <= now - 30:
-            self.disk_history.popleft()
-        busy, busy_tooltip = disk_busy_percent(
-            self.disk_history[0] if len(self.disk_history) > 1 else None, disk_sample
-        )
+        self.disk_history.append(now, disk_sample)
+        busy, busy_tooltip = disk_busy_percent(self.disk_history.baseline(), disk_sample)
         io, io_tooltip = io_pressure_metric(
             parse_io_pressure(self._read(self.proc_root / "pressure/io")),
             busy,
             busy_tooltip,
         )
         battery = self._batteries()
-        wifi = self._wifi(now) if battery.is_laptop else WifiStatus(False, "", None, "")
+        wifi = (
+            self.wifi.get(now)
+            if battery.is_laptop
+            else WifiStatus(False, "", None, "")
+        )
         gpu, gpu_temperature = self._gpu_stats()
-        battery_tooltip = (
-            f"Battery {battery.state.casefold()}"
-            if battery.state
-            else "Battery status unavailable"
-        )
-        wifi_tooltip = (
-            f"{wifi.ssid} · {wifi.device}" if wifi.connected else "Wi-Fi disconnected"
-        )
         return {
             "metrics": {
                 "cpu": cpu,
@@ -1162,43 +1226,35 @@ class StatusCollector:
                 "laptop": battery.is_laptop,
                 "battery": battery.percent,
                 "batteryState": battery.state.casefold(),
-                "batteryTooltip": battery_tooltip,
+                "batteryTooltip": battery_tooltip(battery),
                 "wifi": wifi.strength,
                 "wifiConnected": wifi.connected,
-                "wifiTooltip": wifi_tooltip,
+                "wifiTooltip": wifi_tooltip(wifi),
                 "cpuTemp": hot_temperature(self._cpu_temperature()),
                 "gpuTemp": hot_temperature(gpu_temperature),
             },
             "palette": parse_theme_palette(self._read(self.theme_path)),
-            "workspaces": self._workspaces(now),
+            "workspaces": self.workspaces.get(now),
         }
 
 
-def emit_stream(collector: StatusCollector, interval: float) -> None:
-    while True:
-        started = time.monotonic()
-        print(json.dumps(collector.snapshot(), separators=(",", ":")), flush=True)
-        time.sleep(max(0.0, interval - (time.monotonic() - started)))
-
-
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    collector_factory: Callable[[], StatusCollector] = StatusCollector,
+) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--once", action="store_true", help="emit one snapshot and exit"
     )
     parser.add_argument("--interval", type=float, default=1.0)
     args = parser.parse_args(argv)
-    collector = StatusCollector()
-    if args.once:
-        print(json.dumps(collector.snapshot(), separators=(",", ":")))
-        return 0
-    try:
-        emit_stream(collector, max(0.2, args.interval))
-    except BrokenPipeError:
-        return 0
-    except KeyboardInterrupt:
-        return 130
-    return 0
+    collector = collector_factory()
+    # A sub-200ms cadence buys nothing: the cheapest sampled source (workspaces)
+    # refreshes once a second.
+    return run_stream(
+        collector.snapshot, once=args.once, interval=max(0.2, args.interval)
+    )
 
 
 if __name__ == "__main__":

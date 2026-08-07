@@ -1,4 +1,5 @@
 import QtQuick
+import "StatusSeverity.js" as StatusSeverity
 
 Item {
     id: root
@@ -32,23 +33,11 @@ Item {
     readonly property real valueColumnRight: valueColumnX + displayValueText.width
 
     function valueColor(metric: var): color {
-        if (metric === null || metric === undefined)
-            return root.themeColors.text;
-        if (metric > 75)
-            return "#fb4934";
-        if (metric >= 50)
-            return "#fabd2f";
-        return root.themeColors.text;
+        return StatusSeverity.valueColor(metric, root.themeColors.text);
     }
 
     function severityColor(metric: var, level: int): color {
-        if (level === 2)
-            return "#fb4934";
-        if (level === 1)
-            return "#fabd2f";
-        if (level === 0)
-            return root.themeColors.text;
-        return valueColor(metric);
+        return StatusSeverity.severityColor(metric, level, root.themeColors.text);
     }
 
     // 71 px of fixed label/value content plus balanced outer gutters. The gutter
@@ -108,7 +97,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             clip: true
             text: root.showTemperature ? root.temperature + "°" : ""
-            color: root.temperature >= 85 ? "#fb4934" : "#fabd2f"
+            color: StatusSeverity.temperatureColor(root.temperature)
             horizontalAlignment: Text.AlignLeft
             font.family: "JetBrains Mono"
             font.pixelSize: 13

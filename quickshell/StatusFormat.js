@@ -1,0 +1,113 @@
+.pragma library
+.import "StatusSeverity.js" as StatusSeverity
+
+// Human name for a quota window given its length in minutes. Whole weeks,
+// days and hours read as such; anything else stays in minutes.
+function windowLabel(minutes) {
+    if (minutes === null || minutes === undefined)
+        return "current window";
+    if (minutes % 10080 === 0)
+        return minutes / 10080 + "-week window";
+    if (minutes % 1440 === 0)
+        return minutes / 1440 + "-day window";
+    if (minutes % 60 === 0)
+        return minutes / 60 + "-hour window";
+    return minutes + "-minute window";
+}
+
+// Caption for the left edge of a plot's time axis.
+function spanLabel(seconds) {
+    return seconds % 3600 === 0
+        ? seconds / 3600 + "h ago"
+        : Math.round(seconds / 60) + "m ago";
+}
+
+// Graph heading form of windowLabel.
+function windowTitle(minutes) {
+    return windowLabel(minutes).replace(" window", "").toUpperCase();
+}
+
+// Absolute reset wall-clock, for the tooltip where there is room for it.
+function fullReset(timestamp) {
+    if (timestamp === null || timestamp === undefined)
+        return "reset unavailable";
+    return "resets " + Qt.formatDateTime(
+        new Date(timestamp * 1000),
+        "ddd d MMM yyyy HH:mm t"
+    );
+}
+
+// Coarse countdown for the inline label. Units drop away as the reset nears,
+// and anything under a minute collapses to "<1m" rather than counting seconds.
+function countdownText(timestamp, nowEpoch) {
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp))
+        return "waiting";
+    const remaining = Math.max(0, Math.floor(timestamp - nowEpoch));
+    const days = Math.floor(remaining / 86400);
+    const hours = Math.floor((remaining % 86400) / 3600);
+    const minutes = Math.floor((remaining % 3600) / 60);
+    if (days > 0)
+        return days + "d " + hours + "h " + minutes + "m";
+    if (hours > 0)
+        return hours + "h " + minutes + "m";
+    if (minutes > 0)
+        return minutes + "m";
+    return "<1m";
+}
+
+function percentText(percent) {
+    return percent === null || percent === undefined ? "--" : percent + "%";
+}
+
+function resetText(resetsAt, nowEpoch) {
+    return resetsAt === null || resetsAt === undefined
+        ? "waiting"
+        : "↻ " + countdownText(resetsAt, nowEpoch);
+}
+
+// Full hover text for a usage cell: the primary window on one line and, when
+// the provider reports one, the secondary window on a second.
+function usageTooltipText(provider, usage) {
+    const product = provider === "claude" ? "Claude Code" : "Codex";
+    const percent = usage ? usage.percent : null;
+    if (percent === null || percent === undefined)
+        return product + " usage unavailable · waiting for fresh account activity";
+    let text = product + " " + windowLabel(usage.windowMinutes)
+        + " · " + percentText(percent) + " used · " + fullReset(usage.resetsAt);
+    if (usage.secondaryPercent !== null && usage.secondaryPercent !== undefined) {
+        text += "\n" + windowLabel(usage.secondaryWindowMinutes)
+            + " · " + usage.secondaryPercent + "% used · "
+            + fullReset(usage.secondaryResetsAt);
+    }
+    return text;
+}
+
+// Agent run states as shown beside an activity row.
+function stateLabel(state) {
+    if (state === "working")
+        return "Running";
+    if (state === "attention")
+        return "Awaiting input";
+    return "Idle";
+}
+
+function stateColor(state, themeColors) {
+    if (state === "attention")
+        return StatusSeverity.warnColor;
+    if (state === "working")
+        return themeColors.accent_light;
+    return themeColors.text_dim;
+}
+
+// Activity rows are prefixed with the agent product name, except when the
+// title already is the product name, or the activity is a plain process.
+function activityLabel(activity) {
+    const agent = activity.kind === "claude"
+        ? "Claude Code"
+        : activity.kind === "codex" ? "Codex" : "";
+    if (agent.length === 0)
+        return activity.title;
+    if (activity.title === agent)
+        return agent;
+    return agent + " · " + activity.title;
+}

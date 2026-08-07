@@ -1,5 +1,7 @@
 import QtQuick
 import "StatusGraph.js" as StatusGraph
+import "StatusFormat.js" as StatusFormat
+import "StatusSeverity.js" as StatusSeverity
 
 Item {
     id: root
@@ -58,85 +60,40 @@ Item {
     readonly property string providerName: provider === "claude" ? "CLAUDE" : "CODEX"
     readonly property var percent: usage ? usage.percent : null
     readonly property var resetsAt: usage ? usage.resetsAt : null
-    readonly property string percentText: percent === null || percent === undefined
-        ? "--"
-        : percent + "%"
-    readonly property string resetText: resetsAt === null || resetsAt === undefined
-        ? "waiting"
-        : "↻ " + countdownText(resetsAt)
+    readonly property string percentText: StatusFormat.percentText(percent)
+    readonly property string resetText: StatusFormat.resetText(resetsAt, nowEpoch)
     readonly property color displayColor: percentageColor()
     readonly property real percentColumnX: percentLabel.mapToItem(root, 0, 0).x
     readonly property real resetColumnX: resetLabel.mapToItem(root, 0, 0).x
 
     function windowLabel(minutes: var): string {
-        if (minutes === null || minutes === undefined)
-            return "current window";
-        if (minutes % 10080 === 0)
-            return minutes / 10080 + "-week window";
-        if (minutes % 1440 === 0)
-            return minutes / 1440 + "-day window";
-        if (minutes % 60 === 0)
-            return minutes / 60 + "-hour window";
-        return minutes + "-minute window";
+        return StatusFormat.windowLabel(minutes);
     }
 
     function spanLabel(seconds: int): string {
-        return seconds % 3600 === 0
-            ? seconds / 3600 + "h ago"
-            : Math.round(seconds / 60) + "m ago";
+        return StatusFormat.spanLabel(seconds);
     }
 
     function windowTitle(minutes: var): string {
-        return windowLabel(minutes).replace(" window", "").toUpperCase();
+        return StatusFormat.windowTitle(minutes);
     }
 
     function fullReset(timestamp: var): string {
-        if (timestamp === null || timestamp === undefined)
-            return "reset unavailable";
-        return "resets " + Qt.formatDateTime(
-            new Date(timestamp * 1000),
-            "ddd d MMM yyyy HH:mm t"
-        );
+        return StatusFormat.fullReset(timestamp);
     }
 
     function countdownText(timestamp: var): string {
-        if (typeof timestamp !== "number" || !Number.isFinite(timestamp))
-            return "waiting";
-        const remaining = Math.max(0, Math.floor(timestamp - nowEpoch));
-        const days = Math.floor(remaining / 86400);
-        const hours = Math.floor((remaining % 86400) / 3600);
-        const minutes = Math.floor((remaining % 3600) / 60);
-        if (days > 0)
-            return days + "d " + hours + "h " + minutes + "m";
-        if (hours > 0)
-            return hours + "h " + minutes + "m";
-        if (minutes > 0)
-            return minutes + "m";
-        return "<1m";
+        return StatusFormat.countdownText(timestamp, nowEpoch);
     }
 
     function tooltipText(): string {
-        const product = provider === "claude" ? "Claude Code" : "Codex";
-        if (percent === null || percent === undefined)
-            return product + " usage unavailable · waiting for fresh account activity";
-        let text = product + " " + windowLabel(usage.windowMinutes)
-            + " · " + percentText + " used · " + fullReset(resetsAt);
-        if (usage.secondaryPercent !== null && usage.secondaryPercent !== undefined) {
-            text += "\n" + windowLabel(usage.secondaryWindowMinutes)
-                + " · " + usage.secondaryPercent + "% used · "
-                + fullReset(usage.secondaryResetsAt);
-        }
-        return text;
+        return StatusFormat.usageTooltipText(provider, usage);
     }
 
     function percentageColor(): color {
-        if (percent === null || percent === undefined)
-            return themeColors.text_dim;
-        if (percent >= 90)
-            return "#fb4934";
-        if (percent >= 75)
-            return "#fabd2f";
-        return themeColors.text;
+        return StatusSeverity.usagePercentColor(
+            percent, themeColors.text, themeColors.text_dim
+        );
     }
 
     implicitWidth: compact ? 39 : 188

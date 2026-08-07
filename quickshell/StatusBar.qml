@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Hyprland
 import "StatusLayout.js" as StatusLayout
 import "StatusIcons.js" as StatusIcons
+import "StatusSeverity.js" as StatusSeverity
 
 PanelWindow {
     id: bar
@@ -52,19 +53,15 @@ PanelWindow {
     )
 
     function temperatureSeverity(value: var): int {
-        return value >= 85 ? 2 : 1;
+        return StatusSeverity.temperatureSeverity(value);
     }
 
     function batterySeverity(value: var): int {
-        if (value === null || value === undefined)
-            return 1;
-        return value <= 10 ? 2 : value <= 25 ? 1 : 0;
+        return StatusSeverity.batterySeverity(value);
     }
 
     function wifiSeverity(connected: bool, value: var): int {
-        if (!connected || value === null || value === undefined)
-            return 1;
-        return value < 20 ? 2 : value < 40 ? 1 : 0;
+        return StatusSeverity.wifiSeverity(connected, value);
     }
 
     function beginFocusedWorkspaceRename(): void {

@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -645,6 +648,398 @@ class WorkspaceTest(unittest.TestCase):
     def test_malformed_json_is_an_empty_collection(self) -> None:
         self.assertEqual(status.parse_json_array("null"), [])
         self.assertEqual(status.parse_json_array("not json"), [])
+
+
+class ClientFieldTest(unittest.TestCase):
+    def test_agent_counts_fall_back_to_the_apps_current_values(self) -> None:
+        app = {"tabs": 1, "claude": 0, "codex": 0, "activities": []}
+        self.assertEqual(
+            status.apply_agent_counts(app, {"tabs": 3, "codex": 2}),
+            {"tabs": 3, "claude": 0, "codex": 2, "activities": []},
+        )
+        self.assertEqual(status.apply_agent_counts(app, {}), app)
+        self.assertEqual(
+            status.apply_agent_counts({}, {}),
+            {"tabs": 0, "claude": 0, "codex": 0, "activities": []},
+        )
+
+    def test_agent_activities_are_bounded_per_client(self) -> None:
+        source = {
+            "activities": [{"kind": "claude", "state": "idle", "title": "x"}]
+            * (status.MAX_ACTIVITIES_PER_CLIENT + 5)
+        }
+        fields = status.apply_agent_counts({}, source)
+        self.assertEqual(
+            len(fields["activities"]), status.MAX_ACTIVITIES_PER_CLIENT
+        )
+
+    def test_ghostty_counts_are_read_off_the_window_value(self) -> None:
+        window = ghostty.GhosttyWindow(
+            "/frame/1",
+            0,
+            "repo",
+            100,
+            100,
+            3,
+            1,
+            2,
+            (ghostty.AgentActivity("claude", "working", "repo"),),
+        )
+        self.assertEqual(
+            status.ghostty_agent_counts(window),
+            {
+                "tabs": 3,
+                "claude": 1,
+                "codex": 2,
+                "activities": [
+                    {"kind": "claude", "state": "working", "title": "repo"}
+                ],
+            },
+        )
+
+    def test_non_terminal_clients_get_no_agent_fields(self) -> None:
+        client = {"class": "firefox", "address": "0x1", "title": "[1/4] news"}
+        app = status.client_entry(client)
+        self.assertFalse(app["terminal"])
+        self.assertEqual(
+            status.terminal_fields(client, app, wezterm=None, ghostty=None, stale={}),
+            {},
+        )
+
+    def test_unmatched_wezterm_without_history_falls_back_to_the_title(self) -> None:
+        client = {
+            "class": "org.wezfurlong.wezterm",
+            "address": "0x1",
+            "title": "[1/4] repo",
+        }
+        app = status.client_entry(client)
+        self.assertEqual(
+            status.terminal_fields(client, app, wezterm=None, ghostty=None, stale=None),
+            {"tabs": 4},
+        )
+
+    def test_wezterm_identity_fields_are_omitted_when_unusable(self) -> None:
+        client = {"class": "org.wezfurlong.wezterm", "address": "0x1", "title": "repo"}
+        app = status.client_entry(client)
+        fields = status.terminal_fields(
+            client,
+            app,
+            wezterm={"windowId": 7, "guiPid": 0, "tabs": 2},
+            ghostty=None,
+            stale=None,
+        )
+        self.assertEqual(fields["weztermWindowId"], 7)
+        self.assertNotIn("weztermGuiPid", fields)
+
+    def test_malformed_workspaces_are_skipped_rather_than_raising(self) -> None:
+        names = {0: "DP-2"}
+        self.assertIsNone(status.workspace_placement({}, names))
+        self.assertIsNone(
+            status.workspace_placement({"workspace": {"id": "nope"}}, names)
+        )
+        self.assertIsNone(status.workspace_placement({"workspace": "broken"}, names))
+        self.assertIsNone(
+            status.workspace_placement({"workspace": {"id": 1}, "mapped": False}, names)
+        )
+        self.assertEqual(
+            status.workspace_placement({"workspace": {"id": 2}, "monitor": 0}, names),
+            ((2, "DP-2"), "2"),
+        )
+
+    def test_build_workspaces_tolerates_empty_input(self) -> None:
+        self.assertEqual(status.build_workspaces([], [], []), [])
+
+    def test_previous_clients_are_indexed_by_address_ignoring_junk(self) -> None:
+        index = status.previous_client_index(
+            [
+                {"clients": [{"address": "0x1", "tabs": 3}, "not a client"]},
+                {"clients": []},
+                {},
+            ]
+        )
+        self.assertEqual(index, {"0x1": {"address": "0x1", "tabs": 3}})
+
+    def test_a_pane_without_agents_contributes_one_shell_activity(self) -> None:
+        pane = {"title": "[1/2] ~/repo"}
+        self.assertEqual(
+            status.wezterm_pane_activities(
+                pane,
+                {"claude": 0, "codex": 0},
+                status.MAX_ACTIVITIES_PER_CLIENT,
+                runtime_root=None,
+                state_reader=None,
+            ),
+            [{"kind": "process", "state": "", "title": "~/repo"}],
+        )
+
+    def test_pane_activities_stop_at_the_remaining_budget(self) -> None:
+        pane = {"title": "claude | repo"}
+        self.assertEqual(
+            len(
+                status.wezterm_pane_activities(
+                    pane, {"claude": 9}, 2, runtime_root=None, state_reader=None
+                )
+            ),
+            2,
+        )
+        self.assertEqual(
+            status.wezterm_pane_activities(
+                pane, {"claude": 0}, 0, runtime_root=None, state_reader=None
+            ),
+            [],
+        )
+
+
+class RecordingRunner:
+    """A CommandRunner that records calls and replays canned stdout."""
+
+    def __init__(self, responses: dict[str, str] | None = None) -> None:
+        self.responses = responses or {}
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, command: Sequence[str]) -> str:
+        self.calls.append(tuple(command))
+        for key, value in self.responses.items():
+            if key in command:
+                return value
+        return ""
+
+    def count(self, needle: str) -> int:
+        return sum(1 for call in self.calls if needle in call)
+
+
+class CollectorTest(unittest.TestCase):
+    PROC_FILES = {
+        "stat": "cpu  10 0 10 70 10 0 0 0\n",
+        "meminfo": "MemTotal: 1000 kB\nMemAvailable: 250 kB\n",
+        "diskstats": "259 0 nvme0n1 10 20 1000 40 50 60 2000 80 90 3000\n",
+        "pressure/io": (
+            "some avg10=10.00 avg60=1.00 avg300=1.00 total=1\n"
+            "full avg10=5.00 avg60=1.00 avg300=1.00 total=1\n"
+        ),
+    }
+    SYS_FILES = {
+        "block/nvme0n1/size": "1000\n",
+        "block/loop0/size": "1\n",
+        "class/power_supply/AC0/type": "Mains\n",
+        "class/power_supply/BAT0/type": "Battery\n",
+        "class/power_supply/BAT0/capacity": "80\n",
+        "class/power_supply/BAT0/status": "Discharging\n",
+    }
+
+    @staticmethod
+    def write_tree(root: Path, files: dict[str, str]) -> None:
+        for name, text in files.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+    def build_collector(
+        self, directory: str, runner: object, ticks: list[float]
+    ) -> object:
+        root = Path(directory)
+        self.write_tree(root / "proc", self.PROC_FILES)
+        self.write_tree(root / "sys", self.SYS_FILES)
+        return status.StatusCollector(
+            proc_root=root / "proc",
+            sys_root=root / "sys",
+            runner=runner,
+            clock=lambda: ticks.pop(0) if len(ticks) > 1 else ticks[0],
+            theme_path=root / "missing-theme.lua",
+            runtime_root=root / "run",
+        )
+
+    def test_snapshot_reports_every_metric_from_a_synthetic_proc_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runner = RecordingRunner()
+            ticks = [0.0, 1.0, 1.0]
+            collector = self.build_collector(directory, runner, ticks)
+
+            first = collector.snapshot()
+            metrics = first["metrics"]
+            self.assertEqual(
+                set(metrics),
+                {
+                    "cpu",
+                    "ram",
+                    "io",
+                    "gpu",
+                    "ioTooltip",
+                    "laptop",
+                    "battery",
+                    "batteryState",
+                    "batteryTooltip",
+                    "wifi",
+                    "wifiConnected",
+                    "wifiTooltip",
+                    "cpuTemp",
+                    "gpuTemp",
+                },
+            )
+            self.assertEqual(set(first), {"metrics", "palette", "workspaces"})
+            self.assertEqual(set(first["palette"]), set(status.THEME_KEYS))
+            self.assertEqual(first["workspaces"], [])
+            self.assertIsNone(metrics["cpu"])
+            self.assertEqual(metrics["ram"], 75)
+            self.assertEqual(metrics["io"], 5)
+            self.assertIn("All tasks stalled on disk I/O 5%", metrics["ioTooltip"])
+            self.assertTrue(metrics["laptop"])
+            self.assertEqual(metrics["battery"], 80)
+            self.assertEqual(metrics["batteryState"], "discharging")
+            self.assertEqual(metrics["batteryTooltip"], "Battery discharging")
+            self.assertFalse(metrics["wifiConnected"])
+            self.assertEqual(metrics["wifiTooltip"], "Wi-Fi disconnected")
+            self.assertIsNone(metrics["cpuTemp"])
+            self.assertIsNone(metrics["gpuTemp"])
+
+            (Path(directory) / "proc/stat").write_text("cpu  20 0 20 120 20 0 0 0\n")
+            self.assertEqual(collector.snapshot()["metrics"]["cpu"], 25)
+
+    def test_snapshot_on_a_desktop_reports_no_battery_and_skips_wifi(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runner = RecordingRunner()
+            collector = self.build_collector(directory, runner, [0.0])
+            for name in ("type", "capacity", "status"):
+                (Path(directory) / "sys/class/power_supply/BAT0" / name).unlink()
+
+            metrics = collector.snapshot()["metrics"]
+
+            self.assertFalse(metrics["laptop"])
+            self.assertIsNone(metrics["battery"])
+            self.assertEqual(metrics["batteryTooltip"], "Battery status unavailable")
+            self.assertEqual(runner.count("nmcli"), 0)
+
+    def test_agent_processes_are_read_from_proc_tty_links(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            proc = Path(directory) / "proc"
+            for pid, comm, target in (
+                ("100", "claude", "/dev/pts/2"),
+                ("200", "codex", "/dev/pts/4"),
+                ("300", "codex", "/dev/null"),
+                ("400", "bash", "/dev/pts/9"),
+            ):
+                (proc / pid).mkdir(parents=True)
+                (proc / pid / "comm").write_text(f"{comm}\n")
+                (proc / pid / "fd").mkdir()
+                os.symlink(target, proc / pid / "fd" / "0")
+            (proc / "self").mkdir()
+            (proc / "500").mkdir()  # a process that exited before its fds were read
+            (proc / "500" / "comm").write_text("claude\n")
+            collector = status.StatusCollector(
+                proc_root=proc, sys_root=Path(directory) / "sys", runner=lambda _: ""
+            )
+
+            processes = collector._agent_processes()
+
+            self.assertEqual(
+                sorted((process.kind, process.tty) for process in processes),
+                [("claude", "/dev/pts/2"), ("codex", "/dev/pts/4")],
+            )
+            self.assertEqual(
+                status.agent_counts_by_tty(processes),
+                {
+                    "/dev/pts/2": {"claude": 1, "codex": 0},
+                    "/dev/pts/4": {"claude": 0, "codex": 1},
+                },
+            )
+
+    def test_hyprctl_failure_keeps_workspaces_and_retries_immediately(self) -> None:
+        clients = json.dumps(
+            [
+                {
+                    "mapped": True,
+                    "address": "0x1",
+                    "class": "firefox",
+                    "title": "news",
+                    "workspace": {"id": 2},
+                    "monitor": 0,
+                }
+            ]
+        )
+        monitors = json.dumps([{"id": 0, "name": "DP-2"}])
+        with tempfile.TemporaryDirectory() as directory:
+            runner = RecordingRunner({"clients": clients, "monitors": monitors})
+            ticks = [0.0, 1.0, 1.1, 1.1]
+            collector = self.build_collector(directory, runner, ticks)
+
+            good = collector.snapshot()["workspaces"]
+            self.assertEqual([workspace["id"] for workspace in good], [2])
+
+            runner.responses["clients"] = "not json"
+            retained = collector.snapshot()["workspaces"]
+            self.assertEqual(retained, good)
+
+            # The failed attempt must not consume the 1s interval.
+            runner.responses["clients"] = clients
+            self.assertEqual(collector.snapshot()["workspaces"], good)
+            self.assertEqual(runner.count("monitors"), 3)
+
+    def test_workspaces_are_sampled_at_most_once_a_second(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runner = RecordingRunner({"clients": "[]", "monitors": "[]"})
+            ticks = [0.0, 0.4, 0.9, 1.0, 1.0]
+            collector = self.build_collector(directory, runner, ticks)
+
+            for _ in range(4):
+                collector.snapshot()
+
+            self.assertEqual(runner.count("monitors"), 2)
+
+    def test_wifi_is_refreshed_every_five_seconds(self) -> None:
+        listing = "*:studio:67:wlan0\n"
+        with tempfile.TemporaryDirectory() as directory:
+            runner = RecordingRunner({"nmcli": listing})
+            ticks = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 6.0]
+            collector = self.build_collector(directory, runner, ticks)
+
+            strengths = [
+                collector.snapshot()["metrics"]["wifi"] for _ in range(7)
+            ]
+
+            self.assertEqual(runner.count("nmcli"), 2)
+            self.assertEqual(set(strengths), {67})
+
+
+class MainTest(unittest.TestCase):
+    class FakeCollector:
+        def __init__(self) -> None:
+            self.snapshots = 0
+
+        def snapshot(self) -> dict[str, object]:
+            self.snapshots += 1
+            return {"metrics": {"cpu": 1}, "palette": {}, "workspaces": []}
+
+    def test_once_emits_exactly_one_compact_json_line(self) -> None:
+        collector = self.FakeCollector()
+        stream = io.StringIO()
+
+        with contextlib.redirect_stdout(stream):
+            code = status.main(["--once"], collector_factory=lambda: collector)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(collector.snapshots, 1)
+        lines = stream.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0])["metrics"], {"cpu": 1})
+        self.assertNotIn(", ", lines[0])
+
+    def test_interval_is_clamped_to_a_useful_cadence(self) -> None:
+        recorded: list[tuple[bool, float]] = []
+        original = status.run_stream
+        status.run_stream = lambda snapshot, *, once, interval: (
+            recorded.append((once, interval)) or 7
+        )
+        try:
+            self.assertEqual(
+                status.main([], collector_factory=self.FakeCollector), 7
+            )
+            status.main(["--interval", "0.05"], collector_factory=self.FakeCollector)
+            status.main(["--interval", "30"], collector_factory=self.FakeCollector)
+        finally:
+            status.run_stream = original
+
+        self.assertEqual(recorded, [(False, 1.0), (False, 0.2), (False, 30.0)])
+
 
 if __name__ == "__main__":
     unittest.main()

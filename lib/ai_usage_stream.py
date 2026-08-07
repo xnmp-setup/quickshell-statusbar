@@ -7,18 +7,25 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
-import math
 import os
 import select
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from stream_kit import (
+    JsonObject,
+    ThrottledValue,
+    atomic_write_json,
+    bounded_integer,
+    bounded_percent,
+    run_stream,
+)
 
 MAX_INPUT_BYTES = 1_048_576
 MAX_CACHE_BYTES = 65_536
@@ -36,14 +43,21 @@ HISTORY_MIN_INTERVAL = 300.0
 # real count far below it, so this only caps a pathological history file.
 MAX_HISTORY_SAMPLES = 2_048
 MAX_HISTORY_BYTES = 262_144
+MIN_STREAM_INTERVAL = 5.0
+MIN_CODEX_REFRESH_INTERVAL = 30.0
+# The app-server can take a while to authenticate before it answers; past that
+# a hung process is worth more than a stalled bar, so we cut it loose.
+CODEX_EXCHANGE_TIMEOUT = 12.0
+CODEX_SHUTDOWN_WAIT = 1.0
+# JSON-RPC id of the request whose reply ends the exchange.
+CODEX_RATE_LIMIT_REQUEST_ID = 1
 
-JsonObject = dict[str, Any]
 CodexFetcher = Callable[[], "ProviderUsage | None"]
 
 
 @dataclass(frozen=True)
 class UsageWindow:
-    percent: int
+    used_percent: int
     resets_at: int
     window_minutes: int | None = None
 
@@ -52,27 +66,6 @@ class UsageWindow:
 class ProviderUsage:
     primary: UsageWindow | None = None
     secondary: UsageWindow | None = None
-
-
-def bounded_percent(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    numeric = float(value)
-    if not math.isfinite(numeric):
-        return None
-    return int(max(0.0, min(100.0, numeric)) + 0.5)
-
-
-def bounded_integer(
-    value: object, minimum: int, maximum: int
-) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    numeric = float(value)
-    if not math.isfinite(numeric):
-        return None
-    integer = int(numeric)
-    return integer if minimum <= integer <= maximum else None
 
 
 def usage_window(
@@ -90,7 +83,7 @@ def usage_window(
     if percent is None or resets_at is None:
         return None
     return UsageWindow(
-        percent=percent,
+        used_percent=percent,
         resets_at=resets_at,
         window_minutes=window_minutes or default_window_minutes,
     )
@@ -147,7 +140,7 @@ def parse_codex_messages(lines: Sequence[str]) -> ProviderUsage | None:
             message = json.loads(line)
         except (json.JSONDecodeError, TypeError):
             continue
-        if isinstance(message, Mapping) and message.get("id") == 1:
+        if isinstance(message, Mapping) and message.get("id") == CODEX_RATE_LIMIT_REQUEST_ID:
             return parse_codex_result(message.get("result"))
     return None
 
@@ -157,10 +150,10 @@ def provider_payload(usage: ProviderUsage | None) -> JsonObject:
         return getattr(window, name) if window is not None else None
 
     return {
-        "percent": field(usage.primary if usage else None, "percent"),
+        "percent": field(usage.primary if usage else None, "used_percent"),
         "resetsAt": field(usage.primary if usage else None, "resets_at"),
         "windowMinutes": field(usage.primary if usage else None, "window_minutes"),
-        "secondaryPercent": field(usage.secondary if usage else None, "percent"),
+        "secondaryPercent": field(usage.secondary if usage else None, "used_percent"),
         "secondaryResetsAt": field(usage.secondary if usage else None, "resets_at"),
         "secondaryWindowMinutes": field(
             usage.secondary if usage else None, "window_minutes"
@@ -201,7 +194,7 @@ def migrate_claude_cache_v1(usage: ProviderUsage | None) -> ProviderUsage | None
         if window is None:
             return None
         return UsageWindow(
-            percent=100 - window.percent,
+            used_percent=100 - window.used_percent,
             resets_at=window.resets_at,
             window_minutes=window.window_minutes,
         )
@@ -228,32 +221,12 @@ def write_claude_cache(
     *,
     observed_at: float | None = None,
 ) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     payload = {
         "version": CLAUDE_CACHE_VERSION,
         "observedAt": int(observed_at if observed_at is not None else time.time()),
         "usage": provider_payload(usage),
     }
-    temporary_name = ""
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=".claude-usage-",
-            delete=False,
-        ) as temporary:
-            temporary_name = temporary.name
-            json.dump(payload, temporary, separators=(",", ":"))
-            temporary.write("\n")
-        os.chmod(temporary_name, 0o600)
-        os.replace(temporary_name, path)
-    finally:
-        if temporary_name:
-            try:
-                Path(temporary_name).unlink(missing_ok=True)
-            except OSError:
-                pass
+    atomic_write_json(path, payload, prefix=".claude-usage-")
 
 
 def capture_claude_status(
@@ -415,27 +388,7 @@ def write_history(path: Path, providers: Mapping[str, Sequence[Sample]]) -> None
         "version": HISTORY_VERSION,
         "providers": {name: list(samples) for name, samples in providers.items()},
     }
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary_name = ""
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=".usage-history-",
-            delete=False,
-        ) as temporary:
-            temporary_name = temporary.name
-            json.dump(payload, temporary, separators=(",", ":"))
-            temporary.write("\n")
-        os.chmod(temporary_name, 0o600)
-        os.replace(temporary_name, path)
-    finally:
-        if temporary_name:
-            try:
-                Path(temporary_name).unlink(missing_ok=True)
-            except OSError:
-                pass
+    atomic_write_json(path, payload, prefix=".usage-history-")
 
 
 def codex_requests() -> list[JsonObject]:
@@ -456,12 +409,72 @@ def codex_requests() -> list[JsonObject]:
     ]
 
 
+def completes_exchange(line: str) -> bool:
+    """True once a line carries the reply we asked for; anything else is noise.
+
+    The app-server interleaves notifications and other replies, so the reader
+    keeps going until it sees this — never merely until it sees output.
+    """
+    try:
+        message = json.loads(line)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return (
+        isinstance(message, Mapping)
+        and message.get("id") == CODEX_RATE_LIMIT_REQUEST_ID
+    )
+
+
+def read_lines_until(
+    descriptor: int,
+    deadline: float,
+    *,
+    is_complete: Callable[[str], bool] = completes_exchange,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[str]:
+    """Collect whole lines from `descriptor` until completion, EOF or `deadline`.
+
+    Reads the raw descriptor rather than a buffered reader: `select` only sees
+    the kernel's pipe, so a reply already sitting in a reader's buffer would
+    otherwise look like silence and stall until the deadline.
+    """
+    lines: list[str] = []
+    pending = ""
+    while clock() < deadline:
+        try:
+            ready, _, _ = select.select(
+                [descriptor], [], [], max(0.0, deadline - clock())
+            )
+            if not ready:
+                break
+            chunk = os.read(descriptor, 65_536)
+        except (OSError, ValueError):
+            break  # a dying pipe still yields the lines read so far
+        if not chunk:  # EOF: the server exited
+            break
+        pending += chunk.decode("utf-8", "replace")
+        *complete, pending = pending.split("\n")
+        lines.extend(complete)
+        if any(is_complete(line) for line in complete):
+            break
+        # An unterminated line this long is not a JSON-RPC reply; drop it
+        # rather than growing the buffer without bound.
+        if len(pending) > MAX_INPUT_BYTES:
+            pending = ""
+    # A reply flushed without a trailing newline is still a reply.
+    if pending:
+        lines.append(pending)
+    return lines
+
+
 def run_codex_app_server(
     requests: Sequence[Mapping[str, object]],
     *,
-    timeout: float = 12.0,
+    timeout: float = CODEX_EXCHANGE_TIMEOUT,
     command: Sequence[str] | None = None,
+    is_complete: Callable[[str], bool] = completes_exchange,
 ) -> list[str]:
+    """Write `requests` to a codex app-server and read lines until it answers."""
     executable = os.environ.get("CODEX_BIN", "codex")
     argv = list(command or (executable, "app-server"))
     try:
@@ -482,33 +495,25 @@ def run_codex_app_server(
         for request in requests:
             process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
         process.stdin.flush()
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            ready, _, _ = select.select(
-                [process.stdout], [], [], max(0.0, deadline - time.monotonic())
-            )
-            if not ready:
-                break
-            line = process.stdout.readline()
-            if not line:
-                break
-            lines.append(line.rstrip("\n"))
-            try:
-                message = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(message, Mapping) and message.get("id") == 1:
-                break
+        lines = read_lines_until(
+            process.stdout.fileno(),
+            time.monotonic() + timeout,
+            is_complete=is_complete,
+        )
     except (OSError, ValueError):
-        return lines
+        pass
     finally:
         if process.poll() is None:
             process.terminate()
             try:
-                process.wait(timeout=1.0)
+                process.wait(timeout=CODEX_SHUTDOWN_WAIT)
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.wait(timeout=1.0)
+                process.wait(timeout=CODEX_SHUTDOWN_WAIT)
+        for pipe in (process.stdin, process.stdout):
+            if pipe is not None:
+                with contextlib.suppress(OSError):
+                    pipe.close()
     return lines
 
 
@@ -529,25 +534,22 @@ class UsageCollector:
     ) -> None:
         self.claude_cache_path = claude_cache_path or default_claude_cache_path()
         self.history_path = history_path or default_history_path()
-        self.codex_fetcher = codex_fetcher
         self.wall_clock = wall_clock
         self.monotonic_clock = monotonic_clock
         self.codex_refresh_interval = codex_refresh_interval
-        self.cached_codex: ProviderUsage | None = None
-        self.last_codex_attempt = float("-inf")
+        # Spawning the app-server is expensive, so a failed fetch still spends
+        # the interval; the last good reading covers the gap until it expires.
+        self.codex = ThrottledValue[ProviderUsage | None](
+            codex_fetcher, codex_refresh_interval, initial=None, retry_failed=False
+        )
         self.history = read_history(self.history_path)
 
     def snapshot(self) -> JsonObject:
-        monotonic_now = self.monotonic_clock()
-        if monotonic_now - self.last_codex_attempt >= self.codex_refresh_interval:
-            fresh = self.codex_fetcher()
-            if fresh is not None:
-                self.cached_codex = fresh
-            self.last_codex_attempt = monotonic_now
+        cached_codex = self.codex.get(self.monotonic_clock())
         now = self.wall_clock()
         payloads = {
             "claude": provider_payload(read_claude_cache(self.claude_cache_path, now=now)),
-            "codex": provider_payload(expire_provider(self.cached_codex, now)),
+            "codex": provider_payload(expire_provider(cached_codex, now)),
         }
         self.record_history(payloads, now)
         return {
@@ -571,14 +573,17 @@ class UsageCollector:
             pass
 
 
-def emit_stream(collector: UsageCollector, interval: float) -> None:
-    while True:
-        started = time.monotonic()
-        print(json.dumps(collector.snapshot(), separators=(",", ":")), flush=True)
-        time.sleep(max(0.0, interval - (time.monotonic() - started)))
+CollectorFactory = Callable[..., UsageCollector]
+StreamRunner = Callable[..., int]
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    stdin_text: Callable[[], str] = lambda: sys.stdin.read(MAX_INPUT_BYTES + 1),
+    collector_factory: CollectorFactory = UsageCollector,
+    stream: StreamRunner = run_stream,
+) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capture-claude", action="store_true")
     parser.add_argument("--once", action="store_true")
@@ -592,23 +597,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     cache_path = args.claude_cache or default_claude_cache_path()
     if args.capture_claude:
-        text = sys.stdin.read(MAX_INPUT_BYTES + 1)
-        return 0 if capture_claude_status(text, cache_path) else 1
+        return 0 if capture_claude_status(stdin_text(), cache_path) else 1
 
-    collector = UsageCollector(
+    collector = collector_factory(
         claude_cache_path=cache_path,
-        codex_refresh_interval=max(30.0, args.codex_refresh_interval),
+        codex_refresh_interval=max(
+            MIN_CODEX_REFRESH_INTERVAL, args.codex_refresh_interval
+        ),
     )
-    if args.once:
-        print(json.dumps(collector.snapshot(), separators=(",", ":")))
-        return 0
-    try:
-        emit_stream(collector, max(5.0, args.interval))
-    except BrokenPipeError:
-        return 0
-    except KeyboardInterrupt:
-        return 130
-    return 0
+    return stream(
+        collector.snapshot,
+        once=args.once,
+        interval=max(MIN_STREAM_INTERVAL, args.interval),
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,78 @@
+{
+  "hypr": {
+    "metrics": {
+      "cpu": 42,
+      "ram": 63,
+      "io": 7,
+      "gpu": 18,
+      "ioTooltip": "IO full stall 7%",
+      "laptop": true,
+      "battery": 88,
+      "batteryState": "discharging",
+      "batteryTooltip": "Battery discharging",
+      "wifi": 61,
+      "wifiConnected": true,
+      "wifiTooltip": "HomeNet · wlan0",
+      "cpuTemp": 78,
+      "gpuTemp": null
+    },
+    "palette": {
+      "accent": "#d4607a",
+      "accent_light": "#e87898",
+      "background": "#0a0e28",
+      "surface": "#2a3352",
+      "border": "#3c4268",
+      "text": "#d8dce8",
+      "text_dim": "#8088b4"
+    },
+    "workspaces": [
+      {
+        "id": 1,
+        "name": "dev",
+        "monitor": "DP-2",
+        "clients": [
+          {
+            "address": "0x1",
+            "class": "org.wezfurlong.wezterm",
+            "icon": "org.wezfurlong.wezterm",
+            "terminal": true,
+            "label": "WezTerm",
+            "title": "codex | repo",
+            "tabs": 2,
+            "claude": 1,
+            "codex": 1,
+            "activities": [
+              { "kind": "claude", "state": "idle", "title": "task" },
+              { "kind": "codex", "state": "idle", "title": "repo" }
+            ]
+          }
+        ],
+        "claude": 1,
+        "codex": 1
+      }
+    ]
+  },
+  "usage": {
+    "claude": {
+      "percent": 41,
+      "resetsAt": 1800086400,
+      "windowMinutes": 10080,
+      "secondaryPercent": 24,
+      "secondaryResetsAt": 1800000600,
+      "secondaryWindowMinutes": 300,
+      "history": [
+        [1799990000, 40, 22],
+        [1799996000, 41, 24]
+      ]
+    },
+    "codex": {
+      "percent": null,
+      "resetsAt": null,
+      "windowMinutes": null,
+      "secondaryPercent": null,
+      "secondaryResetsAt": null,
+      "secondaryWindowMinutes": null,
+      "history": []
+    }
+  }
+}

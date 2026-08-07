@@ -6,6 +6,9 @@ import "../quickshell/StatusLayout.js" as StatusLayout
 import "../quickshell/StatusSanitizer.js" as Sanitizer
 import "../quickshell/StatusGraph.js" as StatusGraph
 import "../quickshell/StatusIcons.js" as StatusIcons
+import "../quickshell/StatusSeverity.js" as StatusSeverity
+import "../quickshell/StatusFormat.js" as StatusFormat
+import "../quickshell/StatusCommands.js" as StatusCommands
 
 TestCase {
     id: testCase
@@ -1020,5 +1023,433 @@ TestCase {
             12,
             12
         ));
+    }
+
+    readonly property string bodyColor: "#ebdbb2"
+    readonly property string dimColor: "#a89984"
+
+    function test_metric_value_color_reddens_above_75_and_ambers_from_50(): void {
+        const body = testCase.bodyColor;
+        compare(StatusSeverity.valueColor(null, body), body);
+        compare(StatusSeverity.valueColor(undefined, body), body);
+        compare(StatusSeverity.valueColor(0, body), body);
+        compare(StatusSeverity.valueColor(49, body), body);
+        compare(StatusSeverity.valueColor(49.9, body), body);
+        compare(StatusSeverity.valueColor(50, body), "#fabd2f");
+        compare(StatusSeverity.valueColor(75, body), "#fabd2f");
+        compare(StatusSeverity.valueColor(75.1, body), "#fb4934");
+        compare(StatusSeverity.valueColor(76, body), "#fb4934");
+        compare(StatusSeverity.valueColor(100, body), "#fb4934");
+    }
+
+    function test_explicit_severity_overrides_the_value_thresholds(): void {
+        const body = testCase.bodyColor;
+        // A forced level ignores the reading entirely, in both directions.
+        compare(StatusSeverity.severityColor(100, 0, body), body);
+        compare(StatusSeverity.severityColor(0, 1, body), "#fabd2f");
+        compare(StatusSeverity.severityColor(0, 2, body), "#fb4934");
+        // -1 defers to the percentage thresholds.
+        compare(StatusSeverity.severityColor(90, -1, body), "#fb4934");
+        compare(StatusSeverity.severityColor(50, -1, body), "#fabd2f");
+        compare(StatusSeverity.severityColor(null, -1, body), body);
+        // Any other level is treated as no opinion rather than throwing.
+        compare(StatusSeverity.severityColor(90, 7, body), "#fb4934");
+    }
+
+    function test_temperature_color_and_severity_break_at_85(): void {
+        compare(StatusSeverity.temperatureColor(75), "#fabd2f");
+        compare(StatusSeverity.temperatureColor(84), "#fabd2f");
+        compare(StatusSeverity.temperatureColor(84.9), "#fabd2f");
+        compare(StatusSeverity.temperatureColor(85), "#fb4934");
+        compare(StatusSeverity.temperatureColor(120), "#fb4934");
+        compare(StatusSeverity.temperatureSeverity(84), 1);
+        compare(StatusSeverity.temperatureSeverity(85), 2);
+        // The bar only asks once a temperature is already hot, so a missing
+        // reading still warns rather than reading as normal.
+        compare(StatusSeverity.temperatureSeverity(null), 1);
+        compare(StatusSeverity.temperatureSeverity(undefined), 1);
+    }
+
+    function test_usage_percent_color_breaks_at_75_and_90_inclusive(): void {
+        const body = testCase.bodyColor;
+        const dim = testCase.dimColor;
+        compare(StatusSeverity.usagePercentColor(null, body, dim), dim);
+        compare(StatusSeverity.usagePercentColor(undefined, body, dim), dim);
+        compare(StatusSeverity.usagePercentColor(0, body, dim), body);
+        compare(StatusSeverity.usagePercentColor(74, body, dim), body);
+        compare(StatusSeverity.usagePercentColor(74.9, body, dim), body);
+        // Inclusive at 75, unlike the metric cell's exclusive 75.
+        compare(StatusSeverity.usagePercentColor(75, body, dim), "#fabd2f");
+        compare(StatusSeverity.usagePercentColor(89, body, dim), "#fabd2f");
+        compare(StatusSeverity.usagePercentColor(89.9, body, dim), "#fabd2f");
+        compare(StatusSeverity.usagePercentColor(90, body, dim), "#fb4934");
+        compare(StatusSeverity.usagePercentColor(100, body, dim), "#fb4934");
+    }
+
+    function test_battery_severity_counts_down_through_25_and_10(): void {
+        compare(StatusSeverity.batterySeverity(null), 1);
+        compare(StatusSeverity.batterySeverity(undefined), 1);
+        compare(StatusSeverity.batterySeverity(0), 2);
+        compare(StatusSeverity.batterySeverity(10), 2);
+        compare(StatusSeverity.batterySeverity(10.1), 1);
+        compare(StatusSeverity.batterySeverity(11), 1);
+        compare(StatusSeverity.batterySeverity(25), 1);
+        compare(StatusSeverity.batterySeverity(25.1), 0);
+        compare(StatusSeverity.batterySeverity(26), 0);
+        compare(StatusSeverity.batterySeverity(100), 0);
+    }
+
+    function test_wifi_severity_warns_when_off_and_alerts_below_20(): void {
+        // A disconnected radio is usually deliberate, so it warns.
+        compare(StatusSeverity.wifiSeverity(false, 90), 1);
+        compare(StatusSeverity.wifiSeverity(true, null), 1);
+        compare(StatusSeverity.wifiSeverity(true, undefined), 1);
+        compare(StatusSeverity.wifiSeverity(true, 0), 2);
+        compare(StatusSeverity.wifiSeverity(true, 19), 2);
+        compare(StatusSeverity.wifiSeverity(true, 19.9), 2);
+        compare(StatusSeverity.wifiSeverity(true, 20), 1);
+        compare(StatusSeverity.wifiSeverity(true, 39), 1);
+        compare(StatusSeverity.wifiSeverity(true, 39.9), 1);
+        compare(StatusSeverity.wifiSeverity(true, 40), 0);
+        compare(StatusSeverity.wifiSeverity(true, 100), 0);
+    }
+
+    function test_window_label_reads_in_the_coarsest_whole_unit(): void {
+        compare(StatusFormat.windowLabel(null), "current window");
+        compare(StatusFormat.windowLabel(undefined), "current window");
+        compare(StatusFormat.windowLabel(10080), "1-week window");
+        compare(StatusFormat.windowLabel(20160), "2-week window");
+        compare(StatusFormat.windowLabel(1440), "1-day window");
+        compare(StatusFormat.windowLabel(4320), "3-day window");
+        compare(StatusFormat.windowLabel(60), "1-hour window");
+        compare(StatusFormat.windowLabel(300), "5-hour window");
+        compare(StatusFormat.windowLabel(45), "45-minute window");
+        compare(StatusFormat.windowLabel(1), "1-minute window");
+        // Zero is divisible by everything; the widest unit wins.
+        compare(StatusFormat.windowLabel(0), "0-week window");
+    }
+
+    function test_window_title_strips_the_noun_and_shouts(): void {
+        compare(StatusFormat.windowTitle(300), "5-HOUR");
+        compare(StatusFormat.windowTitle(10080), "1-WEEK");
+        compare(StatusFormat.windowTitle(45), "45-MINUTE");
+        compare(StatusFormat.windowTitle(null), "CURRENT");
+    }
+
+    function test_span_label_uses_hours_only_for_whole_hours(): void {
+        compare(StatusFormat.spanLabel(3600), "1h ago");
+        compare(StatusFormat.spanLabel(14400), "4h ago");
+        compare(StatusFormat.spanLabel(1800), "30m ago");
+        compare(StatusFormat.spanLabel(900), "15m ago");
+        compare(StatusFormat.spanLabel(5400), "90m ago");
+        compare(StatusFormat.spanLabel(0), "0h ago");
+    }
+
+    function test_full_reset_names_the_wall_clock_or_says_so(): void {
+        compare(StatusFormat.fullReset(null), "reset unavailable");
+        compare(StatusFormat.fullReset(undefined), "reset unavailable");
+        const stamped = StatusFormat.fullReset(1800000600);
+        verify(stamped.indexOf("resets ") === 0);
+        // Same instant formatted the same way the component would.
+        compare(stamped, "resets " + Qt.formatDateTime(
+            new Date(1800000600 * 1000), "ddd d MMM yyyy HH:mm t"
+        ));
+    }
+
+    function test_countdown_drops_units_as_the_reset_nears(): void {
+        const now = 1800000000;
+        compare(StatusFormat.countdownText(now + 445260, now), "5d 3h 41m");
+        compare(StatusFormat.countdownText(now + 86400, now), "1d 0h 0m");
+        compare(StatusFormat.countdownText(now + 3660, now), "1h 1m");
+        compare(StatusFormat.countdownText(now + 120, now), "2m");
+        compare(StatusFormat.countdownText(now + 59, now), "<1m");
+        compare(StatusFormat.countdownText(now, now), "<1m");
+        // A reset already in the past clamps to zero rather than counting up.
+        compare(StatusFormat.countdownText(now - 90000, now), "<1m");
+        // Anything that is not a real number is "not yet known".
+        compare(StatusFormat.countdownText(null, now), "waiting");
+        compare(StatusFormat.countdownText(undefined, now), "waiting");
+        compare(StatusFormat.countdownText("1800000600", now), "waiting");
+        compare(StatusFormat.countdownText(NaN, now), "waiting");
+        compare(StatusFormat.countdownText(Infinity, now), "waiting");
+    }
+
+    function test_percent_and_reset_text_fall_back_when_unknown(): void {
+        const now = 1800000000;
+        compare(StatusFormat.percentText(null), "--");
+        compare(StatusFormat.percentText(undefined), "--");
+        compare(StatusFormat.percentText(0), "0%");
+        compare(StatusFormat.percentText(100), "100%");
+        compare(StatusFormat.resetText(null, now), "waiting");
+        compare(StatusFormat.resetText(undefined, now), "waiting");
+        compare(StatusFormat.resetText(now + 3660, now), "↻ 1h 1m");
+    }
+
+    function test_usage_tooltip_names_the_product_and_both_windows(): void {
+        const reset = 1800000600;
+        const secondaryReset = 1800086400;
+        compare(
+            StatusFormat.usageTooltipText("claude", null),
+            "Claude Code usage unavailable · waiting for fresh account activity"
+        );
+        compare(
+            StatusFormat.usageTooltipText("codex", { percent: null }),
+            "Codex usage unavailable · waiting for fresh account activity"
+        );
+        compare(
+            StatusFormat.usageTooltipText("codex", { percent: undefined }),
+            "Codex usage unavailable · waiting for fresh account activity"
+        );
+        // Single window: one line, no newline.
+        const single = StatusFormat.usageTooltipText("claude", {
+            percent: 76,
+            resetsAt: reset,
+            windowMinutes: 300,
+            secondaryPercent: null
+        });
+        compare(single, "Claude Code 5-hour window · 76% used · "
+            + StatusFormat.fullReset(reset));
+        verify(single.indexOf("\n") === -1);
+        // Secondary window adds exactly one more line.
+        const paired = StatusFormat.usageTooltipText("claude", {
+            percent: 76,
+            resetsAt: reset,
+            windowMinutes: 300,
+            secondaryPercent: 41,
+            secondaryResetsAt: secondaryReset,
+            secondaryWindowMinutes: 10080
+        });
+        compare(paired.split("\n").length, 2);
+        compare(paired.split("\n")[1], "1-week window · 41% used · "
+            + StatusFormat.fullReset(secondaryReset));
+        // A missing secondary reset degrades in place rather than dropping it.
+        const stampless = StatusFormat.usageTooltipText("claude", {
+            percent: 76,
+            resetsAt: null,
+            windowMinutes: null,
+            secondaryPercent: 41,
+            secondaryResetsAt: null,
+            secondaryWindowMinutes: null
+        });
+        compare(stampless, "Claude Code current window · 76% used · reset unavailable"
+            + "\ncurrent window · 41% used · reset unavailable");
+    }
+
+    function test_agent_state_labels_and_colors_default_to_idle(): void {
+        compare(StatusFormat.stateLabel("working"), "Running");
+        compare(StatusFormat.stateLabel("attention"), "Awaiting input");
+        compare(StatusFormat.stateLabel("idle"), "Idle");
+        compare(StatusFormat.stateLabel("nonsense"), "Idle");
+        compare(StatusFormat.stateLabel(""), "Idle");
+        compare(StatusFormat.stateLabel(null), "Idle");
+        compare(StatusFormat.stateLabel(undefined), "Idle");
+        const theme = testCase.themeColors;
+        compare(StatusFormat.stateColor("attention", theme), "#fabd2f");
+        compare(StatusFormat.stateColor("working", theme), theme.accent_light);
+        compare(StatusFormat.stateColor("idle", theme), theme.text_dim);
+        compare(StatusFormat.stateColor("nonsense", theme), theme.text_dim);
+        compare(StatusFormat.stateColor(null, theme), theme.text_dim);
+    }
+
+    function test_activity_label_prefixes_the_agent_without_repeating_it(): void {
+        compare(
+            StatusFormat.activityLabel({ kind: "claude", title: "dotfiles" }),
+            "Claude Code · dotfiles"
+        );
+        compare(
+            StatusFormat.activityLabel({ kind: "codex", title: "chezmoi" }),
+            "Codex · chezmoi"
+        );
+        // A title that is already the product name is not doubled up.
+        compare(
+            StatusFormat.activityLabel({ kind: "claude", title: "Claude Code" }),
+            "Claude Code"
+        );
+        compare(
+            StatusFormat.activityLabel({ kind: "codex", title: "Codex" }),
+            "Codex"
+        );
+        // Non-agent kinds keep their bare title.
+        compare(
+            StatusFormat.activityLabel({ kind: "process", title: "cargo build" }),
+            "cargo build"
+        );
+        compare(
+            StatusFormat.activityLabel({ kind: "unknown", title: "" }),
+            ""
+        );
+    }
+
+    function test_focus_command_is_the_exact_hyprland_dispatch(): void {
+        const command = StatusCommands.focusWorkspaceCommand(7);
+        compare(command.length, 3);
+        compare(command[0], "hyprctl");
+        compare(command[1], "dispatch");
+        compare(command[2], "hl.dsp.focus({ workspace = 7 })");
+        // Ids arrive as numbers from Hyprland and as strings from the model.
+        compare(
+            StatusCommands.focusWorkspaceCommand("12")[2],
+            "hl.dsp.focus({ workspace = 12 })"
+        );
+        compare(
+            StatusCommands.focusWorkspaceCommand(-99)[2],
+            "hl.dsp.focus({ workspace = -99 })"
+        );
+    }
+
+    function test_rename_command_is_the_exact_helper_invocation(): void {
+        const command = StatusCommands.renameWorkspaceCommand(
+            "/home/test", 4, "Deep work"
+        );
+        compare(command.length, 3);
+        compare(command[0], "/home/test/.local/bin/rename-hypr-workspace");
+        compare(command[1], "4");
+        compare(command[2], "Deep work");
+        // The id is always stringified; the name is passed through verbatim,
+        // including an empty reset and anything shell-hostile.
+        compare(StatusCommands.renameWorkspaceCommand("/root", "9", "")[1], "9");
+        compare(StatusCommands.renameWorkspaceCommand("/root", 9, "")[2], "");
+        compare(
+            StatusCommands.renameWorkspaceCommand("/root", 9, "a b; rm -rf /")[2],
+            "a b; rm -rf /"
+        );
+        compare(
+            StatusCommands.renameWorkspaceCommand("", 1, "x")[0],
+            "/.local/bin/rename-hypr-workspace"
+        );
+    }
+
+    function test_plot_geometry_reserves_the_gutter_and_axis_caption(): void {
+        const captioned = StatusGraph.plotGeometry(224, 48, true);
+        compare(captioned.plotWidth, 194);
+        compare(captioned.top, 3);
+        compare(captioned.bottom, 35);
+        const bare = StatusGraph.plotGeometry(224, 48, false);
+        compare(bare.plotWidth, 194);
+        compare(bare.top, 3);
+        compare(bare.bottom, 45);
+    }
+
+    function test_graph_x_spreads_samples_across_the_plot_width(): void {
+        compare(StatusGraph.xFor(0, 5, 200), 0);
+        compare(StatusGraph.xFor(2, 5, 200), 100);
+        compare(StatusGraph.xFor(4, 5, 200), 200);
+        compare(StatusGraph.xFor(1, 2, 194), 194);
+    }
+
+    function test_graph_y_inverts_the_value_within_the_band(): void {
+        const range = { min: 0, max: 100 };
+        compare(StatusGraph.yFor(100, range, 3, 35), 3);
+        compare(StatusGraph.yFor(0, range, 3, 35), 35);
+        compare(StatusGraph.yFor(50, range, 3, 35), 19);
+        // Offset bands map their own min and max to the same edges.
+        const offset = { min: 20, max: 24 };
+        compare(StatusGraph.yFor(24, offset, 3, 35), 3);
+        compare(StatusGraph.yFor(20, offset, 3, 35), 35);
+        compare(StatusGraph.yFor(22, offset, 3, 35), 19);
+    }
+
+    function test_degenerate_range_is_unreachable_through_bounds(): void {
+        // A zero-width band divides by zero, so bounds() guarantees one at
+        // least 4 wide before any value is ever mapped.
+        verify(!Number.isFinite(
+            StatusGraph.yFor(5, { min: 5, max: 5 }, 3, 35)
+        ));
+        const flat = StatusGraph.bounds([5, 5, 5]);
+        compare(flat.max - flat.min, 4);
+        compare(StatusGraph.yFor(5, flat, 3, 35), 19);
+        const single = StatusGraph.bounds([12]);
+        compare(single.min, 10);
+        compare(single.max, 14);
+        compare(StatusGraph.bounds([]), null);
+    }
+
+    function test_tick_decimals_appear_only_for_narrow_bands(): void {
+        compare(StatusGraph.tickDecimals({ min: 0, max: 100 }), 0);
+        compare(StatusGraph.tickDecimals({ min: 0, max: 8 }), 0);
+        compare(StatusGraph.tickDecimals({ min: 0, max: 7.9 }), 1);
+        // The narrowest band bounds() can produce still gets a decimal.
+        compare(StatusGraph.tickDecimals(StatusGraph.bounds([5, 5])), 1);
+    }
+
+    // The consumer side of the Python→QML wire contract: the same fixture is
+    // asserted against the producers in tests/test_stream_contract.py, so
+    // neither side can rename or drop a field without a test failing.
+    function readContractFixture() {
+        const request = new XMLHttpRequest();
+        request.open("GET", Qt.resolvedUrl("fixtures/stream_contract.json"), false);
+        request.send();
+        verify(request.responseText.length > 0,
+               "cannot read stream_contract.json — run qmltestrunner with "
+               + "QML_XHR_ALLOW_FILE_READ=1 (see README)");
+        return JSON.parse(request.responseText);
+    }
+
+    function test_contract_fixture_metrics_survive_the_sanitizer(): void {
+        const fixture = readContractFixture();
+        const base = {
+            cpu: null, ram: null, io: null, gpu: null,
+            laptop: false, battery: null, batteryState: "",
+            wifi: null, wifiConnected: false, cpuTemp: null, gpuTemp: null,
+            ioTooltip: "", batteryTooltip: "", wifiTooltip: ""
+        };
+        const normalized = Sanitizer.normalizeMetrics(base, fixture.hypr.metrics);
+        for (const key of Object.keys(fixture.hypr.metrics))
+            compare(normalized[key], fixture.hypr.metrics[key], "metrics." + key);
+        const palette = Sanitizer.mergeObject({}, fixture.hypr.palette);
+        compare(Object.keys(palette).sort().join(","),
+                Object.keys(fixture.hypr.palette).sort().join(","));
+    }
+
+    function test_contract_fixture_workspaces_survive_the_sanitizer(): void {
+        const fixture = readContractFixture();
+        const normalized = Sanitizer.normalizeWorkspaces(fixture.hypr.workspaces);
+        compare(normalized.length, 1);
+        const workspace = normalized[0];
+        const expected = fixture.hypr.workspaces[0];
+        for (const key of ["id", "name", "monitor", "claude", "codex"])
+            compare(workspace[key], expected[key], "workspace." + key);
+        const client = workspace.clients[0];
+        const expectedClient = expected.clients[0];
+        for (const key of ["address", "class", "icon", "terminal", "label",
+                           "title", "tabs", "claude", "codex"])
+            compare(client[key], expectedClient[key], "client." + key);
+        compare(client.activities.length, expectedClient.activities.length);
+        for (let index = 0; index < client.activities.length; index += 1) {
+            compare(client.activities[index].kind,
+                    expectedClient.activities[index].kind);
+            compare(client.activities[index].state,
+                    expectedClient.activities[index].state);
+            compare(client.activities[index].title,
+                    expectedClient.activities[index].title);
+        }
+    }
+
+    function test_contract_fixture_usage_survives_the_sanitizer(): void {
+        const fixture = readContractFixture();
+        const emptyProvider = {
+            percent: null, resetsAt: null, windowMinutes: null,
+            secondaryPercent: null, secondaryResetsAt: null,
+            secondaryWindowMinutes: null
+        };
+        const normalized = Sanitizer.normalizeUsage(
+            { claude: emptyProvider, codex: emptyProvider }, fixture.usage);
+        for (const key of Object.keys(emptyProvider)) {
+            compare(normalized.claude[key], fixture.usage.claude[key],
+                    "claude." + key);
+            compare(normalized.codex[key], fixture.usage.codex[key],
+                    "codex." + key);
+        }
+        // Wire history triples [at, primary, secondary] become plot samples.
+        compare(normalized.claude.history.length,
+                fixture.usage.claude.history.length);
+        for (let index = 0; index < normalized.claude.history.length; index += 1) {
+            const sample = normalized.claude.history[index];
+            const wire = fixture.usage.claude.history[index];
+            compare(sample.at, wire[0]);
+            compare(sample.percent, wire[1]);
+            compare(sample.secondaryPercent, wire[2]);
+        }
+        compare(normalized.codex.history.length, 0);
     }
 }

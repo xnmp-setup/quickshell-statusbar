@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "StatusFormat.js" as StatusFormat
 
 HoverPopup {
     id: control
@@ -13,30 +14,15 @@ HoverPopup {
         + (workspaceData.claude + workspaceData.codex === 1 ? " agent" : " agents")
 
     function stateLabel(state: string): string {
-        if (state === "working")
-            return "Running";
-        if (state === "attention")
-            return "Awaiting input";
-        return "Idle";
+        return StatusFormat.stateLabel(state);
     }
 
     function stateColor(state: string): color {
-        if (state === "attention")
-            return "#fabd2f";
-        if (state === "working")
-            return themeColors.accent_light;
-        return themeColors.text_dim;
+        return StatusFormat.stateColor(state, themeColors);
     }
 
     function activityLabel(activity: var): string {
-        const agent = activity.kind === "claude"
-            ? "Claude Code"
-            : activity.kind === "codex" ? "Codex" : "";
-        if (agent.length === 0)
-            return activity.title;
-        if (activity.title === agent)
-            return agent;
-        return agent + " · " + activity.title;
+        return StatusFormat.activityLabel(activity);
     }
 
     // Workspace contents are the primary hover interaction, so reveal them

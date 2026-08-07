@@ -94,13 +94,14 @@ HoverPopup {
                         if (values.length < 2)
                             return;
                         const range = StatusGraph.bounds(values);
-                        const gutter = 30;
-                        const plotWidth = width - gutter;
-                        const top = 3;
-                        const bottom = height - (modelData.span.length > 0 ? 13 : 3);
-                        const yFor = value => bottom
-                            - (value - range.min) / (range.max - range.min) * (bottom - top);
-                        const xFor = index => index / (values.length - 1) * plotWidth;
+                        const box = StatusGraph.plotGeometry(
+                            width, height, modelData.span.length > 0
+                        );
+                        const plotWidth = box.plotWidth;
+                        const top = box.top;
+                        const bottom = box.bottom;
+                        const yFor = value => StatusGraph.yFor(value, range, top, bottom);
+                        const xFor = index => StatusGraph.xFor(index, values.length, plotWidth);
                         const drawSeries = (points, style, lineWidth) => {
                             context.strokeStyle = style;
                             context.lineWidth = lineWidth;
@@ -143,7 +144,7 @@ HoverPopup {
                         context.fillStyle = dim;
                         context.font = "8px Inter";
                         context.textAlign = "right";
-                        const decimals = range.max - range.min < 8 ? 1 : 0;
+                        const decimals = StatusGraph.tickDecimals(range);
                         context.fillText(range.max.toFixed(decimals), width, top + 6);
                         context.fillText(range.min.toFixed(decimals), width, bottom);
                         if (modelData.span.length > 0) {

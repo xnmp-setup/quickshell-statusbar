@@ -116,3 +116,40 @@ function bounds(values) {
     }
     return { min: minimum, max: maximum };
 }
+
+// Right-hand strip reserved for the min/max tick labels.
+const plotGutter = 30;
+// Breathing room above the line, and below it when no time axis is captioned.
+const plotTopInset = 3;
+const plotBottomInset = 3;
+// Extra depth taken by the "<span> ago … now" axis caption.
+const plotAxisInset = 13;
+
+// Drawing box for one series canvas. `hasSpan` is true when the time axis is
+// captioned, which steals height from the bottom of the plot.
+function plotGeometry(width, height, hasSpan) {
+    return {
+        plotWidth: width - plotGutter,
+        top: plotTopInset,
+        bottom: height - (hasSpan ? plotAxisInset : plotBottomInset)
+    };
+}
+
+// Sample index to canvas x. Samples are evenly spaced, the first sitting on
+// the left edge and the last on the right edge of the plot area.
+function xFor(index, count, plotWidth) {
+    return index / (count - 1) * plotWidth;
+}
+
+// Value to canvas y, inverted so larger values sit higher. A degenerate range
+// (min === max) yields NaN; bounds() never produces one, since it pads any
+// span narrower than 4.
+function yFor(value, range, top, bottom) {
+    return bottom - (value - range.min) / (range.max - range.min) * (bottom - top);
+}
+
+// Tick labels gain a decimal only when the band is too narrow for whole
+// numbers to distinguish the ends.
+function tickDecimals(range) {
+    return range.max - range.min < 8 ? 1 : 0;
+}

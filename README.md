@@ -24,7 +24,13 @@ Deployed by chezmoi as a `git-repo` external cloned to
 
 - `~/.config/quickshell/statusbar` → `quickshell/`
 - `~/.local/bin/{hypr-status-stream,ai-usage-stream,rename-hypr-workspace}` → `bin/…`
-- `~/.local/lib/{hypr_status_stream,ai_usage_stream,ghostty_status}.py` → `lib/…`
+- `~/.local/lib/{hypr_status_stream,ai_usage_stream,ghostty_status,stream_kit}.py` → `lib/…`
+
+`stream_kit.py` is the shared infrastructure toolkit both streams import. Its
+`~/.local/lib` symlink is optional for imports (Python resolves a script
+symlink to its real directory, the clone's `lib/`), but the file must exist in
+the deployed clone — a checkout without it breaks both `bin/` streams at
+startup with `ModuleNotFoundError`.
 
 Run with:
 
@@ -45,12 +51,19 @@ qs -d -p ~/.config/quickshell/statusbar
 ## Tests
 
 ```sh
-uv run python -m unittest tests.test_hypr_status_stream tests.test_ai_usage_stream
-/usr/lib/qt6/bin/qmltestrunner -input tests/tst_statusbar.qml \
+uv run python -m unittest discover -s tests -p 'test_*.py'
+QML_XHR_ALLOW_FILE_READ=1 /usr/lib/qt6/bin/qmltestrunner -input tests/tst_statusbar.qml \
   -import "$PWD/tests/stubs" -platform offscreen
 sh tests/rename-hypr-workspace.test.sh
 ```
 
 The QML suite needs the **Qt 6** `qmltestrunner` (the one on `PATH` is often
-Qt 5, which fails silently). `tests/stubs/` holds a stand-in for the Quickshell
-QML module, whose C++ plugin only loads inside the `quickshell` binary.
+Qt 5, which fails silently) and `QML_XHR_ALLOW_FILE_READ=1` so the contract
+tests can read `tests/fixtures/stream_contract.json`. `tests/stubs/` holds a
+stand-in for the Quickshell QML module, whose C++ plugin only loads inside the
+`quickshell` binary.
+
+`tests/fixtures/stream_contract.json` pins the Python→QML wire contract from
+both ends: `tests/test_stream_contract.py` proves the streams emit its exact
+structure, and `tests/tst_statusbar.qml` proves `StatusSanitizer.js` accepts it
+unchanged — neither side can drift alone.
