@@ -478,6 +478,80 @@ TestCase {
         compare(tip.anchorX, 20);
     }
 
+    function tooltipOf(item: var): var {
+        for (let index = 0; index < item.data.length; index += 1) {
+            const child = item.data[index];
+            if (child !== null && typeof child === "object" && "anchorX" in child)
+                return child;
+        }
+        return null;
+    }
+
+    function test_metric_cell_hover_opens_and_closes_its_tooltip(): void {
+        const cell = createTemporaryObject(metricComponent, this, {
+            value: 42,
+            tooltip: "Total CPU use",
+            history: [10, 20, 30],
+            smoothHistory: true,
+            hoverX: 61
+        });
+        verify(cell !== null);
+        const tip = tooltipOf(cell);
+        verify(tip !== null);
+        compare(tip.visible, false);
+
+        cell.hoverActive = true;
+        tryCompare(tip, "opened", true);
+        compare(tip.anchorX, 61);
+        compare(tip.showsGraph, true);
+
+        cell.hoverActive = false;
+        tryCompare(tip, "visible", false);
+    }
+
+    function test_metric_cell_without_tooltip_text_never_opens(): void {
+        const cell = createTemporaryObject(metricComponent, this, {
+            value: 42,
+            tooltip: ""
+        });
+        verify(cell !== null);
+        cell.hoverActive = true;
+        wait(150);
+        compare(tooltipOf(cell).visible, false);
+    }
+
+    function test_usage_cell_hover_opens_rate_and_cumulative_graphs(): void {
+        const cell = createTemporaryObject(usageCellComponent, this, {
+            history: [40, 41, 41, 43]
+        });
+        verify(cell !== null);
+        const tip = tooltipOf(cell);
+        verify(tip !== null);
+
+        cell.hoverActive = true;
+        tryCompare(tip, "opened", true);
+        compare(tip.normalizedSeries.length, 2);
+        compare(tip.normalizedSeries[0].label, "BURN RATE · % PER HOUR");
+        compare(tip.normalizedSeries[1].label, "CUMULATIVE USED · %");
+
+        cell.hoverActive = false;
+        tryCompare(tip, "visible", false);
+    }
+
+    function test_workspace_chip_hover_opens_tooltip_unless_busy(): void {
+        const strip = createTemporaryObject(stripComponent, this);
+        verify(strip !== null);
+        const chip = strip.chipAt(0);
+        const tip = tooltipOf(chip);
+        verify(tip !== null);
+
+        chip.hoverActive = true;
+        tryCompare(tip, "opened", true);
+
+        chip.hoverActive = false;
+        tryCompare(tip, "visible", false);
+    }
+
     function test_numeric_column_does_not_move_with_digit_count(): void {
         const oneDigit = metricAt(5);
         const twoDigits = metricAt(55);

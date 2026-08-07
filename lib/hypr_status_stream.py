@@ -333,6 +333,52 @@ def disk_busy_percent(
     return clamp_percent(busy), tooltip
 
 
+def parse_io_pressure(text: str) -> tuple[float | None, float | None]:
+    """Parse /proc/pressure/io avg10 values for the some and full lines."""
+    some: float | None = None
+    full: float | None = None
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields or fields[0] not in {"some", "full"}:
+            continue
+        for field in fields[1:]:
+            if not field.startswith("avg10="):
+                continue
+            try:
+                value = float(field[len("avg10=") :])
+            except ValueError:
+                continue
+            if 0 <= value <= 100:
+                if fields[0] == "some":
+                    some = value
+                else:
+                    full = value
+    return some, full
+
+
+def io_pressure_metric(
+    pressure: tuple[float | None, float | None],
+    busy: int | None,
+    busy_tooltip: str,
+) -> tuple[int | None, str]:
+    """Prefer PSI stall time over device busy time for the inline IO metric.
+
+    Device utilisation is nearly meaningless on multi-queue NVMe: tasks can be
+    stalled on I/O most of the time while the device reports modest busy time.
+    PSI measures the stalls directly. Kernels without CONFIG_PSI (or booted
+    with psi=0) fall back to the busy-time metric.
+    """
+    some, full = pressure
+    if some is None:
+        return busy, busy_tooltip
+    tooltip = f"Tasks stalled on disk I/O {round(some)}% of the last 10s"
+    if full is not None:
+        tooltip += f" · all tasks stalled {round(full)}%"
+    if busy is not None:
+        tooltip += f"\n{busy_tooltip}"
+    return clamp_percent(some), tooltip
+
+
 def parse_tab_count(title: str) -> int:
     title = strip_wezterm_window_tag(title)
     match = TITLE_PREFIX.match(title)
@@ -1082,8 +1128,13 @@ class StatusCollector:
         self.disk_history.append(disk_sample)
         while len(self.disk_history) > 1 and self.disk_history[1].timestamp <= now - 30:
             self.disk_history.popleft()
-        io, io_tooltip = disk_busy_percent(
+        busy, busy_tooltip = disk_busy_percent(
             self.disk_history[0] if len(self.disk_history) > 1 else None, disk_sample
+        )
+        io, io_tooltip = io_pressure_metric(
+            parse_io_pressure(self._read(self.proc_root / "pressure/io")),
+            busy,
+            busy_tooltip,
         )
         battery = self._batteries()
         wifi = self._wifi(now) if battery.is_laptop else WifiStatus(False, "", None, "")

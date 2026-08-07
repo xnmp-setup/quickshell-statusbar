@@ -60,6 +60,36 @@ class MetricsTest(unittest.TestCase):
         new = status.DiskSample(1, {"sda": status.DiskCounters(0, 0, 2_000)})
         self.assertEqual(status.disk_busy_percent(old, new)[0], 100)
 
+    def test_io_pressure_parses_psi_and_rejects_malformed_input(self) -> None:
+        some, full = status.parse_io_pressure(
+            "some avg10=58.92 avg60=44.51 avg300=30.12 total=1561059370\n"
+            "full avg10=48.84 avg60=38.10 avg300=25.01 total=1511312143\n"
+        )
+        self.assertEqual(some, 58.92)
+        self.assertEqual(full, 48.84)
+        self.assertEqual(status.parse_io_pressure(""), (None, None))
+        self.assertEqual(
+            status.parse_io_pressure("some avg10=broken\nnonsense avg10=4"),
+            (None, None),
+        )
+        self.assertEqual(
+            status.parse_io_pressure("some avg10=900 total=1"), (None, None)
+        )
+
+    def test_io_metric_prefers_stall_time_over_device_busy_time(self) -> None:
+        io, tooltip = status.io_pressure_metric(
+            (58.92, 48.84), 12, "nvme0n1 was servicing I/O 12% of the last 30s"
+        )
+        self.assertEqual(io, 59)
+        self.assertIn("stalled on disk I/O 59% of the last 10s", tooltip)
+        self.assertIn("all tasks stalled 49%", tooltip)
+        self.assertIn("nvme0n1 was servicing", tooltip)
+
+    def test_io_metric_falls_back_to_busy_time_without_psi(self) -> None:
+        io, tooltip = status.io_pressure_metric((None, None), 12, "busy detail")
+        self.assertEqual(io, 12)
+        self.assertEqual(tooltip, "busy detail")
+
     def test_temperatures_are_hidden_until_hot_and_reject_impossible_values(
         self,
     ) -> None:

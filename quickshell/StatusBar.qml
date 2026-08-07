@@ -196,7 +196,7 @@ PanelWindow {
             MetricCell {
                 label: "IO"
                 value: bar.statusSource.metrics.io
-                tooltip: bar.statusSource.metrics.ioTooltip || "Disk busy time over the trailing 30 seconds"
+                tooltip: bar.statusSource.metrics.ioTooltip || "Time tasks were stalled on disk I/O"
                 themeColors: bar.themeColors
                 history: bar.statusSource.history.io
                 smoothHistory: true

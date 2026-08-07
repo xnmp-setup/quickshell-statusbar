@@ -116,25 +116,31 @@ Item {
         }
     }
 
+    // Overridable seam so tests can drive the real popup-open path; live it
+    // simply mirrors the hover handler. A competing hover-enabled MouseArea
+    // must NOT be added here: buttonless MouseAreas break popup activation on
+    // the live compositor even though they behave offscreen.
+    property bool hoverActive: hoverHandler.hovered
+    // Last pointer x captured during event delivery. HoverHandler.point
+    // resets to zeroed values between events, so it must be sampled inside
+    // onPointChanged, never read from a binding.
+    property real hoverX: -1
+
     HoverHandler {
         id: hoverHandler
-    }
-
-    // HoverHandler.point resets to zeroed values between events, so a
-    // no-button MouseArea supplies the continuously valid pointer position.
-    MouseArea {
-        id: pointerTracker
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
+        onPointChanged: {
+            const position = point.position;
+            if (position.x !== 0 || position.y !== 0)
+                root.hoverX = position.x;
+        }
     }
 
     ThemedToolTip {
-        visible: hoverHandler.hovered && root.tooltip.length > 0
+        visible: root.hoverActive && root.tooltip.length > 0
         text: root.tooltip
         themeColors: root.themeColors
         history: root.history
         smoothed: root.smoothHistory
-        pointerX: pointerTracker.mouseX
+        pointerX: root.hoverX
     }
 }

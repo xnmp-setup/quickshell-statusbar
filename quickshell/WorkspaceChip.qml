@@ -27,6 +27,10 @@ Rectangle {
     readonly property color textPrimary: themeColors.text
     readonly property color textSecondary: themeColors.text_dim
 
+    // Overridable seam so tests can drive the real popup-open path; live it
+    // mirrors the pointer MouseArea and the rename/menu suppression rules.
+    property bool hoverActive: pointer.containsMouse && !editing && !contextMenu.opened
+
     signal renameStarted(int workspaceId)
     signal renameFinished
 
@@ -271,7 +275,7 @@ Rectangle {
     }
 
     WorkspaceToolTip {
-        visible: pointer.containsMouse && !chip.editing && !contextMenu.opened
+        visible: chip.hoverActive
         workspaceData: chip.workspaceData
         themeColors: chip.themeColors
         pointerX: pointer.mouseX
