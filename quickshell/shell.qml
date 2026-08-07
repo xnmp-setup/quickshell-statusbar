@@ -18,7 +18,7 @@ ShellRoot {
     }
 
     BarSettings {
-        id: settings
+        id: barSettings
     }
 
     IpcHandler {
@@ -41,11 +41,11 @@ ShellRoot {
         }
 
         function autoHide(enabled: bool): void {
-            settings.setAutoHide(enabled);
+            barSettings.setAutoHide(enabled);
         }
 
         function autoHidden(): bool {
-            return settings.autoHide;
+            return barSettings.autoHide;
         }
 
         function renameCurrentWorkspace(): void {
@@ -63,7 +63,7 @@ ShellRoot {
             barVisible: root.barVisible
             candidate: root.candidate
             statusSource: source
-            settings: settings
+            settings: barSettings
             renameRequestSerial: root.renameRequestSerial
         }
     }
