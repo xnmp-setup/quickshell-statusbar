@@ -76,16 +76,19 @@ class MetricsTest(unittest.TestCase):
             status.parse_io_pressure("some avg10=900 total=1"), (None, None)
         )
 
-    def test_io_metric_prefers_stall_time_over_device_busy_time(self) -> None:
+    def test_io_metric_shows_full_stall_time_not_device_busy_time(self) -> None:
         io, tooltip = status.io_pressure_metric(
             (58.92, 48.84), 12, "nvme0n1 was servicing I/O 12% of the last 30s"
         )
-        self.assertEqual(io, 59)
-        self.assertIn("stalled on disk I/O 59% of the last 10s", tooltip)
-        self.assertIn("all tasks stalled 49%", tooltip)
+        self.assertEqual(io, 49)
+        self.assertIn("All tasks stalled on disk I/O 49% of the last 10s", tooltip)
+        self.assertIn("some task stalled 59%", tooltip)
         self.assertIn("nvme0n1 was servicing", tooltip)
 
-    def test_io_metric_falls_back_to_busy_time_without_psi(self) -> None:
+    def test_io_metric_degrades_to_some_then_busy_time(self) -> None:
+        io, tooltip = status.io_pressure_metric((58.92, None), 12, "busy detail")
+        self.assertEqual(io, 59)
+        self.assertIn("Some task stalled on disk I/O 59%", tooltip)
         io, tooltip = status.io_pressure_metric((None, None), 12, "busy detail")
         self.assertEqual(io, 12)
         self.assertEqual(tooltip, "busy detail")

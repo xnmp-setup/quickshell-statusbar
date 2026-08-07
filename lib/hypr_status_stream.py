@@ -369,14 +369,19 @@ def io_pressure_metric(
     with psi=0) fall back to the busy-time metric.
     """
     some, full = pressure
-    if some is None:
+    value = full if full is not None else some
+    if value is None:
         return busy, busy_tooltip
-    tooltip = f"Tasks stalled on disk I/O {round(some)}% of the last 10s"
-    if full is not None:
-        tooltip += f" · all tasks stalled {round(full)}%"
+    # The inline number is the full-stall figure: the share of time every
+    # non-idle task was blocked on disk at once. The softer some-task figure
+    # stays in the tooltip.
+    label = "All tasks" if full is not None else "Some task"
+    tooltip = f"{label} stalled on disk I/O {round(value)}% of the last 10s"
+    if full is not None and some is not None:
+        tooltip += f" · some task stalled {round(some)}%"
     if busy is not None:
         tooltip += f"\n{busy_tooltip}"
-    return clamp_percent(some), tooltip
+    return clamp_percent(value), tooltip
 
 
 def parse_tab_count(title: str) -> int:
