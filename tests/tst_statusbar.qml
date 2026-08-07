@@ -300,6 +300,21 @@ TestCase {
         compare(spread.max, 90);
     }
 
+    function test_graph_bounds_never_dip_below_zero_for_non_negative_series(): void {
+        // A resting burn rate is all zeroes; padding it must widen upward
+        // instead of labelling the axis with rates that cannot occur.
+        const idle = StatusGraph.bounds([0, 0, 0]);
+        compare(idle.min, 0);
+        compare(idle.max, 4);
+        const crawling = StatusGraph.bounds([0, 1, 0.5]);
+        compare(crawling.min, 0);
+        compare(crawling.max, 4);
+        // Genuinely negative data still gets a band that contains it.
+        const signed = StatusGraph.bounds([-1, -1]);
+        compare(signed.min, -3);
+        compare(signed.max, 1);
+    }
+
     function test_tooltip_graph_needs_two_numeric_samples(): void {
         const bare = createTemporaryObject(themedTooltipComponent, this);
         const sparse = createTemporaryObject(themedTooltipComponent, this, {

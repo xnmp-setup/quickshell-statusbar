@@ -102,17 +102,24 @@ function numericValues(values) {
 }
 
 // Y-axis bounds padded so a flat series still renders mid-band instead of
-// hugging an edge.
+// hugging an edge. Every plotted series is a non-negative quantity (percent
+// used, percent per hour), so padding a near-zero series is slid up to rest on
+// zero rather than inventing negative tick labels.
 function bounds(values) {
     const numbers = numericValues(values);
     if (numbers.length === 0)
         return null;
-    let minimum = Math.min.apply(null, numbers);
+    const dataMinimum = Math.min.apply(null, numbers);
+    let minimum = dataMinimum;
     let maximum = Math.max.apply(null, numbers);
     if (maximum - minimum < 4) {
         const center = (maximum + minimum) / 2;
         minimum = center - 2;
         maximum = center + 2;
+    }
+    if (dataMinimum >= 0 && minimum < 0) {
+        maximum -= minimum;
+        minimum = 0;
     }
     return { min: minimum, max: maximum };
 }
