@@ -275,7 +275,8 @@ Rectangle {
     }
 
     WorkspaceToolTip {
-        visible: chip.hoverActive
+        shown: chip.hoverActive
+        hostItem: chip
         workspaceData: chip.workspaceData
         themeColors: chip.themeColors
         pointerX: pointer.mouseX

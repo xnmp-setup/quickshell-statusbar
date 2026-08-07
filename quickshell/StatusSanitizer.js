@@ -3,6 +3,7 @@
 const MAX_WORKSPACES = 64;
 const MAX_CLIENTS_PER_WORKSPACE = 128;
 const MAX_ACTIVITIES_PER_CLIENT = 32;
+const MAX_USAGE_SAMPLES = 2048;
 
 function safeString(value, fallback, limit) {
     if (typeof value !== "string")
@@ -45,10 +46,38 @@ function normalizedWindowMinutes(value, fallback) {
     return boundedInteger(value, fallback, 1, 525600);
 }
 
+// Quota history arrives as [epochSeconds, primaryPercent, secondaryPercent]
+// triples, oldest first. Malformed rows are dropped rather than defaulted so a
+// corrupt history never fabricates a data point.
+function normalizeUsageHistory(value, fallback) {
+    if (value === null || value === undefined
+            || typeof value.length !== "number")
+        return fallback;
+    const samples = [];
+    for (let index = 0; index < value.length && index < MAX_USAGE_SAMPLES; index += 1) {
+        const entry = value[index];
+        if (entry === null || entry === undefined || typeof entry.length !== "number"
+                || entry.length !== 3)
+            continue;
+        const at = normalizedTimestamp(entry[0], null);
+        const percent = normalizedPercent(entry[1], null);
+        if (at === null || percent === null)
+            continue;
+        samples.push({
+            at: at,
+            percent: percent,
+            secondaryPercent: normalizedPercent(entry[2], null)
+        });
+    }
+    return samples;
+}
+
 function normalizeUsageProvider(base, raw) {
     const provider = mergeObject({}, base);
     if (raw === null || typeof raw !== "object" || Array.isArray(raw))
         return provider;
+    if ("history" in raw)
+        provider.history = normalizeUsageHistory(raw.history, provider.history || []);
     for (const key of ["percent", "secondaryPercent"]) {
         if (key in raw)
             provider[key] = normalizedPercent(raw[key], provider[key]);

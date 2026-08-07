@@ -430,12 +430,38 @@ TestCase {
         compare(strip.chipAt(1), null);
     }
 
-    function test_usage_burn_rate_derives_from_cumulative_samples(): void {
-        compare(StatusGraph.deltaPerHour([], 30), []);
-        compare(StatusGraph.deltaPerHour([40], 30), []);
-        // 30-second cadence: +1% per sample is 120%/hour; resets clamp to 0.
-        compare(StatusGraph.deltaPerHour([40, 41, 41, 3], 30), [120, 0, 0]);
-        compare(StatusGraph.deltaPerHour([10, null, 12, "junk", 13], 30), [240, 120]);
+    function test_usage_history_resamples_onto_an_even_time_grid(): void {
+        const samples = [
+            { at: 1000, percent: 10, secondaryPercent: 1 },
+            { at: 1500, percent: 20, secondaryPercent: null },
+            { at: 2000, percent: 30, secondaryPercent: 3 }
+        ];
+        // A quota reading holds until the next one replaces it.
+        compare(StatusGraph.resample(samples, "percent", 2000, 1000, 5),
+            [10, 10, 20, 20, 30]);
+        // Buckets before the first reading stay empty rather than inventing a
+        // value, so a young history draws only where it was measured.
+        compare(StatusGraph.resample(samples, "percent", 2500, 2000, 5),
+            [null, 10, 20, 30, 30]);
+        // A missing sub-reading blanks its buckets without shifting the rest.
+        compare(StatusGraph.resample(samples, "secondaryPercent", 2000, 1000, 5),
+            [1, 1, null, null, 3]);
+        compare(StatusGraph.resample([], "percent", 2000, 1000, 5),
+            [null, null, null, null, null]);
+        compare(StatusGraph.resample(null, "percent", 2000, 1000, 5), []);
+        compare(StatusGraph.resample(samples, "percent", 2000, 1000, 1), []);
+    }
+
+    function test_usage_burn_rate_measures_a_trailing_window(): void {
+        // Ten-minute buckets with an hour of lookback: six buckets back, so
+        // +1% per bucket reads as 6% per hour once the lookback is available.
+        compare(StatusGraph.ratePerHour([0, 1, 2, 3, 4, 5, 6, 7], 600, 3600),
+            [null, null, null, null, null, null, 6, 6]);
+        // A quota reset clamps to zero rather than reporting negative burn.
+        compare(StatusGraph.ratePerHour([50, 0], 1800, 1800), [null, 0]);
+        // Gaps in the source stay gaps in the rate.
+        compare(StatusGraph.ratePerHour([null, 2, 8], 1800, 1800), [null, null, 12]);
+        compare(StatusGraph.ratePerHour([], 600, 3600), []);
     }
 
     function test_tooltip_series_replace_the_single_history_graph(): void {
@@ -461,21 +487,23 @@ TestCase {
         compare(multi.showsGraph, true);
     }
 
-    function test_tooltip_opens_anchored_under_the_pointer(): void {
+    function test_tooltip_anchor_tracks_the_pointer(): void {
         const tip = createTemporaryObject(themedTooltipComponent, this, {
             pointerX: 70
         });
         verify(tip !== null);
-        compare(tip.anchorX, -1);
-        tip.open();
-        tryCompare(tip, "opened", true);
-        compare(tip.anchorX, 70);
-        tip.close();
-        tryCompare(tip, "visible", false);
+        compare(tip.anchor.rect.x, 70);
+        // The anchor follows the pointer instead of freezing where the hint
+        // was first shown, so the hint stays under the cursor.
         tip.pointerX = 20;
-        tip.open();
-        tryCompare(tip, "opened", true);
-        compare(tip.anchorX, 20);
+        compare(tip.anchor.rect.x, 20);
+        // Without a pointer reading there is nothing to anchor to.
+        tip.pointerX = -1;
+        compare(tip.anchorX, 0);
+        // A hint with nothing to hang from never shows.
+        tip.shown = true;
+        wait(150);
+        compare(tip.opened, false);
     }
 
     function tooltipOf(item: var): var {
@@ -503,10 +531,13 @@ TestCase {
         cell.hoverActive = true;
         tryCompare(tip, "opened", true);
         compare(tip.anchorX, 61);
+        compare(tip.anchor.rect.x, 61);
+        // Hints hang below the cell they describe, never over it.
+        compare(tip.anchor.rect.y, cell.height + tip.gap);
         compare(tip.showsGraph, true);
 
         cell.hoverActive = false;
-        tryCompare(tip, "visible", false);
+        tryCompare(tip, "opened", false);
     }
 
     function test_metric_cell_without_tooltip_text_never_opens(): void {
@@ -517,12 +548,36 @@ TestCase {
         verify(cell !== null);
         cell.hoverActive = true;
         wait(150);
-        compare(tooltipOf(cell).visible, false);
+        compare(tooltipOf(cell).opened, false);
     }
 
-    function test_usage_cell_hover_opens_rate_and_cumulative_graphs(): void {
+    function usageSamples(now: var): var {
+        const samples = [];
+        // Five-minute readings across the plotted window, climbing 1% each:
+        // steady consumption of 12% per hour.
+        for (let index = 0; index <= 72; index += 1) {
+            samples.push({
+                at: now - (72 - index) * 300,
+                percent: index,
+                secondaryPercent: index
+            });
+        }
+        return samples;
+    }
+
+    function test_usage_cell_graphs_both_windows_and_the_burn_rate(): void {
+        const now = 1800000000;
         const cell = createTemporaryObject(usageCellComponent, this, {
-            history: [40, 41, 41, 43]
+            nowEpoch: now,
+            usage: {
+                percent: 72,
+                resetsAt: now + 3600,
+                windowMinutes: 10080,
+                secondaryPercent: 72,
+                secondaryResetsAt: now + 600,
+                secondaryWindowMinutes: 300,
+                history: usageSamples(now)
+            }
         });
         verify(cell !== null);
         const tip = tooltipOf(cell);
@@ -530,12 +585,33 @@ TestCase {
 
         cell.hoverActive = true;
         tryCompare(tip, "opened", true);
-        compare(tip.normalizedSeries.length, 2);
-        compare(tip.normalizedSeries[0].label, "BURN RATE · % PER HOUR");
-        compare(tip.normalizedSeries[1].label, "CUMULATIVE USED · %");
+        compare(tip.normalizedSeries.length, 3);
+        compare(tip.normalizedSeries[0].label, "1-WEEK · % USED");
+        compare(tip.normalizedSeries[1].label, "5-HOUR · % USED");
+        compare(tip.normalizedSeries[2].label, "BURN RATE · % PER HOUR");
+        // Every graph is captioned with the window it covers.
+        compare(tip.normalizedSeries[0].span, "6h ago");
+        // The plot ends at the newest reading, not at an interpolated point.
+        const cumulative = tip.normalizedSeries[0].values;
+        compare(cumulative[cumulative.length - 1], 72);
+        // 1% per five minutes is 12%/hour. Readings hold until replaced, so
+        // the lookback rounds out to the sample cadence rather than landing
+        // exactly on an hour.
+        const rate = tip.normalizedSeries[2].values;
+        verify(rate[rate.length - 1] > 11 && rate[rate.length - 1] < 14);
 
         cell.hoverActive = false;
-        tryCompare(tip, "visible", false);
+        tryCompare(tip, "opened", false);
+    }
+
+    function test_usage_cell_without_history_shows_no_graph(): void {
+        const cell = createTemporaryObject(usageCellComponent, this, {
+            usage: { percent: 52, resetsAt: 1800003600, windowMinutes: 10080 }
+        });
+        verify(cell !== null);
+        const tip = tooltipOf(cell);
+        verify(tip !== null);
+        compare(tip.showsGraph, false);
     }
 
     function test_workspace_chip_hover_opens_tooltip_unless_busy(): void {
@@ -549,7 +625,7 @@ TestCase {
         tryCompare(tip, "opened", true);
 
         chip.hoverActive = false;
-        tryCompare(tip, "visible", false);
+        tryCompare(tip, "opened", false);
     }
 
     function test_numeric_column_does_not_move_with_digit_count(): void {

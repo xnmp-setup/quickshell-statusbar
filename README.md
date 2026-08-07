@@ -46,6 +46,11 @@ qs -d -p ~/.config/quickshell/statusbar
 
 ```sh
 uv run python -m unittest tests.test_hypr_status_stream tests.test_ai_usage_stream
-QT_QPA_PLATFORM=offscreen qmltestrunner -input tests/tst_statusbar.qml -o -,txt
+/usr/lib/qt6/bin/qmltestrunner -input tests/tst_statusbar.qml \
+  -import "$PWD/tests/stubs" -platform offscreen
 sh tests/rename-hypr-workspace.test.sh
 ```
+
+The QML suite needs the **Qt 6** `qmltestrunner` (the one on `PATH` is often
+Qt 5, which fails silently). `tests/stubs/` holds a stand-in for the Quickshell
+QML module, whose C++ plugin only loads inside the `quickshell` binary.

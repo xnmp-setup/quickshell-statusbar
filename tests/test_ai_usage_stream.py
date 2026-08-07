@@ -173,12 +173,89 @@ class CollectorTest(unittest.TestCase):
                 wall_clock=lambda: clocks["wall"],
                 monotonic_clock=lambda: clocks["mono"],
                 codex_refresh_interval=300,
+                history_path=Path(directory) / "history.json",
             )
             self.assertEqual(collector.snapshot()["codex"]["percent"], 65)
             clocks.update(wall=NOW + 301, mono=301)
             self.assertEqual(collector.snapshot()["codex"]["percent"], 65)
             clocks.update(wall=NOW + 601, mono=302)
             self.assertIsNone(collector.snapshot()["codex"]["percent"])
+
+    def test_history_survives_a_restart_and_carries_the_window_edge(self) -> None:
+        clocks = {"wall": float(NOW)}
+        with tempfile.TemporaryDirectory() as directory:
+            history_path = Path(directory) / "history.json"
+
+            def collect() -> object:
+                return usage.UsageCollector(
+                    claude_cache_path=Path(directory) / "missing.json",
+                    codex_fetcher=lambda: usage.ProviderUsage(
+                        primary=usage.UsageWindow(
+                            int(clocks["wall"] - NOW) // 3600, NOW + 86_400, 300
+                        )
+                    ),
+                    wall_clock=lambda: clocks["wall"],
+                    monotonic_clock=lambda: clocks["wall"] - NOW,
+                    codex_refresh_interval=0,
+                    history_path=history_path,
+                )
+
+            collector = collect()
+            for hour in range(9):
+                clocks["wall"] = NOW + hour * 3600
+                collector.snapshot()
+
+            # A fresh process picks the history back up from disk.
+            history = collect().snapshot()["codex"]["history"]
+            self.assertEqual([sample[1] for sample in history], [1, 2, 3, 4, 5, 6, 7, 8])
+            # The reading that was current when the window opened is kept as
+            # its left edge, even though it was taken before the window.
+            self.assertLess(history[0][0], clocks["wall"] - usage.HISTORY_SPAN_SECONDS)
+
+    def test_unchanged_readings_are_coalesced_but_changes_are_not(self) -> None:
+        samples: list[usage.Sample] = []
+        for offset in (0, 60, 120, 400):
+            samples = usage.append_sample(samples, {"percent": 40}, NOW + offset)
+        # Inside the coalescing window an unchanged reading adds nothing.
+        self.assertEqual([sample[0] for sample in samples], [NOW, NOW + 400])
+        # A change is always recorded immediately.
+        samples = usage.append_sample(samples, {"percent": 41}, NOW + 401)
+        self.assertEqual(samples[-1], [NOW + 401, 41, None])
+        # A reading with no percentage is not a data point.
+        self.assertEqual(usage.append_sample(samples, {"percent": None}, NOW + 500), samples)
+        # Timestamps never go backwards, whatever the clock says.
+        self.assertEqual(usage.append_sample(samples, {"percent": 90}, NOW + 1), samples)
+
+    def test_corrupt_history_is_discarded_rather_than_plotted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            path.write_text("{not json")
+            self.assertEqual(usage.read_history(path), {})
+            path.write_text(json.dumps({"version": 99, "providers": {"claude": []}}))
+            self.assertEqual(usage.read_history(path), {})
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": usage.HISTORY_VERSION,
+                        "providers": {
+                            "claude": [
+                                [NOW + 60, 5, 6],
+                                [NOW, 4, None],
+                                "junk",
+                                [NOW + 120, 400, None],
+                                [None, 7, 8],
+                                [NOW + 180, 9],
+                            ]
+                        },
+                    }
+                )
+            )
+            # Malformed rows drop out; the rest is ordered oldest first and
+            # bounded to a real percentage.
+            self.assertEqual(
+                usage.read_history(path)["claude"],
+                [[NOW, 4, None], [NOW + 60, 5, 6], [NOW + 120, 100, None]],
+            )
 
     def test_app_server_request_sequence_is_initialized_before_rate_limit_read(self) -> None:
         requests = usage.codex_requests()

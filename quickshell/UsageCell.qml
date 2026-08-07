@@ -9,9 +9,50 @@ Item {
     required property var themeColors
     property bool compact: false
     property bool last: false
-    // Recent quota-consumed samples for the hover graph.
-    property var history: []
     property double nowEpoch: Date.now() / 1000
+    // Trailing window plotted by the hover graphs.
+    property int spanSeconds: 6 * 3600
+    property int graphBuckets: 96
+    // Quota percentages are whole numbers that creep, so a rate measured over
+    // one sample is a spike train. An hour of lookback resolves it to 1 %/h.
+    property int rateLookbackSeconds: 3600
+    readonly property int bucketSeconds: spanSeconds / (graphBuckets - 1)
+    // Timestamped {at, percent, secondaryPercent} samples from the usage
+    // stream, oldest first, spanning the last several hours.
+    readonly property var history: usage && usage.history ? usage.history : []
+    readonly property var primarySeries: StatusGraph.resample(
+        history, "percent", nowEpoch, spanSeconds, graphBuckets
+    )
+    readonly property var secondarySeries: StatusGraph.resample(
+        history, "secondaryPercent", nowEpoch, spanSeconds, graphBuckets
+    )
+    readonly property string spanLabel: Math.round(spanSeconds / 3600) + "h ago"
+    readonly property var graphSeries: {
+        const series = [{
+            label: windowTitle(usage ? usage.windowMinutes : null) + " · % USED",
+            values: primarySeries,
+            smoothed: false,
+            span: spanLabel
+        }];
+        if (StatusGraph.finiteCount(secondarySeries) >= 2) {
+            series.push({
+                label: windowTitle(usage.secondaryWindowMinutes) + " · % USED",
+                values: secondarySeries,
+                smoothed: false,
+                span: spanLabel
+            });
+        }
+        series.push({
+            label: "BURN RATE · % PER HOUR",
+            // Already a trailing average by construction, so no overlay.
+            values: StatusGraph.ratePerHour(
+                primarySeries, bucketSeconds, rateLookbackSeconds
+            ),
+            smoothed: false,
+            span: spanLabel
+        });
+        return series;
+    }
     readonly property string providerName: provider === "claude" ? "CLAUDE" : "CODEX"
     readonly property var percent: usage ? usage.percent : null
     readonly property var resetsAt: usage ? usage.resetsAt : null
@@ -35,6 +76,10 @@ Item {
         if (minutes % 60 === 0)
             return minutes / 60 + "-hour window";
         return minutes + "-minute window";
+    }
+
+    function windowTitle(minutes: var): string {
+        return windowLabel(minutes).replace(" window", "").toUpperCase();
     }
 
     function fullReset(timestamp: var): string {
@@ -185,23 +230,11 @@ Item {
     }
 
     ThemedToolTip {
-        visible: root.hoverActive
+        shown: root.hoverActive
+        hostItem: root
         text: root.tooltipText()
         themeColors: root.themeColors
-        // Quota consumed and how fast it is being burned. Samples arrive
-        // every 30 seconds from the usage stream.
-        series: [
-            {
-                label: "BURN RATE · % PER HOUR",
-                values: StatusGraph.deltaPerHour(root.history, 30),
-                smoothed: true
-            },
-            {
-                label: "CUMULATIVE USED · %",
-                values: root.history,
-                smoothed: false
-            }
-        ]
+        series: root.graphSeries
         pointerX: root.hoverX
     }
 }

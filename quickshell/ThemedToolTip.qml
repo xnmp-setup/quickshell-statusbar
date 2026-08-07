@@ -1,72 +1,55 @@
 import QtQuick
-import QtQuick.Controls
 import "StatusGraph.js" as StatusGraph
 
-ToolTip {
+HoverPopup {
     id: control
 
-    required property var themeColors
+    property string text: ""
     property int maximumWidth: 420
     // Recent samples, oldest first. Two or more numeric points draw a graph.
     property var history: []
     // Overlay a moving average for jittery series (CPU, IO, GPU, Wi-Fi).
     property bool smoothed: false
     property int smoothingWindow: 10
-    // Multiple labeled graphs: [{label, values, smoothed}]. When set it
-    // replaces the single history graph.
+    // Multiple labeled graphs: [{label, values, smoothed, span}]. When set it
+    // replaces the single history graph. `span` captions the time axis.
     property var series: []
-    // Pointer x in parent coordinates. The popup maps under the pointer as it
-    // opens; anchorX freezes the open position because Wayland popups cannot
-    // rely on being movable after they are mapped.
-    property real pointerX: -1
-    property real anchorX: -1
-    readonly property color surfaceColor: themeColors.surface
     readonly property var normalizedSeries: {
         const result = [];
-        const append = (label, values, wantSmoothed) => {
-            const numbers = StatusGraph.numericValues(values);
-            if (numbers.length >= 2)
-                result.push({ label: label, values: numbers, smoothed: wantSmoothed });
+        const append = (label, values, wantSmoothed, span) => {
+            const points = StatusGraph.alignedValues(values);
+            if (StatusGraph.finiteCount(points) >= 2)
+                result.push({
+                    label: label,
+                    values: points,
+                    smoothed: wantSmoothed,
+                    span: span || ""
+                });
         };
         if (series && typeof series.length === "number" && series.length > 0) {
             for (let index = 0; index < series.length; index += 1) {
                 const entry = series[index];
                 if (entry !== null && typeof entry === "object")
-                    append(entry.label || "", entry.values, entry.smoothed === true);
+                    append(entry.label || "", entry.values, entry.smoothed === true, entry.span);
             }
         } else {
-            append("", history, smoothed);
+            append("", history, smoothed, "");
         }
         return result;
     }
     readonly property bool showsGraph: normalizedSeries.length > 0
-
-    // Status-bar hints should track the pointer without feeling sticky, while a
-    // tiny guard avoids flashing a popup when crossing adjacent metrics.
-    delay: 90
-    timeout: -1
-    padding: 10
-    popupType: Popup.Window
-    implicitWidth: Math.min(
-        maximumWidth,
-        contentItem.implicitWidth + leftPadding + rightPadding
+    readonly property int contentWidth: Math.min(
+        maximumWidth - 2 * padding,
+        Math.max(hintText.implicitWidth, showsGraph ? 224 : 0)
     )
 
-    x: anchorX >= 0
-        ? anchorX - width / 2
-        : parent ? (parent.width - width) / 2 : 0
-    y: parent ? parent.height + 6 : 0
-
-    onAboutToShow: anchorX = pointerX
-
-    contentItem: Column {
+    Column {
         spacing: 6
 
         Text {
-            width: Math.min(
-                control.maximumWidth - control.leftPadding - control.rightPadding,
-                implicitWidth
-            )
+            id: hintText
+
+            width: control.contentWidth
             text: control.text
             color: control.themeColors.text
             wrapMode: Text.Wrap
@@ -96,12 +79,13 @@ ToolTip {
 
                 Canvas {
                     id: graphCanvas
-                    width: 224
+                    width: control.contentWidth
                     height: 48
 
                     // The model row is replaced wholesale on data change, so a
                     // repaint on completion covers both creation and updates.
                     Component.onCompleted: requestPaint()
+                    onWidthChanged: requestPaint()
 
                     onPaint: {
                         const context = getContext("2d");
@@ -113,7 +97,7 @@ ToolTip {
                         const gutter = 30;
                         const plotWidth = width - gutter;
                         const top = 3;
-                        const bottom = height - 3;
+                        const bottom = height - (modelData.span.length > 0 ? 13 : 3);
                         const yFor = value => bottom
                             - (value - range.min) / (range.max - range.min) * (bottom - top);
                         const xFor = index => index / (values.length - 1) * plotWidth;
@@ -125,8 +109,12 @@ ToolTip {
                             let started = false;
                             for (let index = 0; index < points.length; index += 1) {
                                 const value = points[index];
-                                if (typeof value !== "number" || !Number.isFinite(value))
+                                if (typeof value !== "number" || !Number.isFinite(value)) {
+                                    // A gap breaks the line rather than
+                                    // bridging across missing measurements.
+                                    started = false;
                                     continue;
+                                }
                                 if (started)
                                     context.lineTo(xFor(index), yFor(value));
                                 else
@@ -158,16 +146,15 @@ ToolTip {
                         const decimals = range.max - range.min < 8 ? 1 : 0;
                         context.fillText(range.max.toFixed(decimals), width, top + 6);
                         context.fillText(range.min.toFixed(decimals), width, bottom);
+                        if (modelData.span.length > 0) {
+                            context.textAlign = "left";
+                            context.fillText(modelData.span, 0, height - 2);
+                            context.textAlign = "right";
+                            context.fillText("now", plotWidth, height - 2);
+                        }
                     }
                 }
             }
         }
-    }
-
-    background: Rectangle {
-        color: control.surfaceColor
-        border.width: 1
-        border.color: control.themeColors.border
-        radius: 6
     }
 }

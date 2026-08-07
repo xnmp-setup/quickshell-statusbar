@@ -1,25 +1,11 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
-ToolTip {
+HoverPopup {
     id: control
 
     required property var workspaceData
-    required property var themeColors
-    // Pointer x in parent coordinates. The popup maps under the pointer as it
-    // opens; anchorX freezes the open position because Wayland popups cannot
-    // rely on being movable after they are mapped.
-    property real pointerX: -1
-    property real anchorX: -1
-    readonly property color surfaceColor: themeColors.surface
-
-    x: anchorX >= 0
-        ? anchorX - width / 2
-        : parent ? (parent.width - width) / 2 : 0
-    y: parent ? parent.height + 6 : 0
-
-    onAboutToShow: anchorX = pointerX
+    readonly property int contentWidth: 388 - 2 * padding
     readonly property int visibleClientCount: Math.min(workspaceData.clients.length, 8)
     readonly property string windowSummary: workspaceData.clients.length
         + (workspaceData.clients.length === 1 ? " window" : " windows")
@@ -56,16 +42,12 @@ ToolTip {
     // Workspace contents are the primary hover interaction, so reveal them
     // immediately instead of inheriting the desktop tooltip pause.
     delay: 0
-    timeout: -1
     padding: 12
-    popupType: Popup.Window
-    implicitWidth: 388
-    implicitHeight: contentColumn.implicitHeight + topPadding + bottomPadding
 
-    contentItem: Column {
+    Column {
         id: contentColumn
 
-        width: control.availableWidth
+        width: control.contentWidth
         spacing: 8
 
         RowLayout {
@@ -251,12 +233,5 @@ ToolTip {
             font.pixelSize: 10
             font.weight: Font.Medium
         }
-    }
-
-    background: Rectangle {
-        color: control.surfaceColor
-        border.width: 1
-        border.color: control.themeColors.border
-        radius: 6
     }
 }

@@ -253,7 +253,6 @@ PanelWindow {
             usage: bar.statusSource.usage.claude
             themeColors: bar.themeColors
             compact: bar.compactUsage
-            history: bar.statusSource.history.claude
         }
 
         UsageCell {
@@ -261,7 +260,6 @@ PanelWindow {
             usage: bar.statusSource.usage.codex
             themeColors: bar.themeColors
             compact: bar.compactUsage
-            history: bar.statusSource.history.codex
             last: true
         }
     }

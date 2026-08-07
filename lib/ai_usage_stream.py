@@ -26,6 +26,16 @@ MAX_RESET_TIMESTAMP = 4_102_444_800  # 2100-01-01 UTC
 DEFAULT_STREAM_INTERVAL = 30.0
 DEFAULT_CODEX_REFRESH_INTERVAL = 300.0
 CLAUDE_CACHE_VERSION = 2
+HISTORY_VERSION = 1
+# The bar plots quota consumption over this trailing window.
+HISTORY_SPAN_SECONDS = 6 * 3600
+# Quota percentages are integers that move slowly, so unchanged readings are
+# only re-recorded this often. The bar step-interpolates between samples.
+HISTORY_MIN_INTERVAL = 300.0
+# Bound on retained samples per provider; the span and interval above keep the
+# real count far below it, so this only caps a pathological history file.
+MAX_HISTORY_SAMPLES = 2_048
+MAX_HISTORY_BYTES = 262_144
 
 JsonObject = dict[str, Any]
 CodexFetcher = Callable[[], "ProviderUsage | None"]
@@ -293,6 +303,136 @@ def read_claude_cache(path: Path, *, now: float | None = None) -> ProviderUsage 
     return expire_provider(usage, now if now is not None else time.time())
 
 
+Sample = list[int | None]
+
+
+def default_history_path() -> Path:
+    """Quota history outlives a reboot, so it lives in the cache, not runtime."""
+    cache_root = os.environ.get("XDG_CACHE_HOME", "").strip()
+    root = Path(cache_root) if cache_root else Path.home() / ".cache"
+    return root / "statusbar-ai-usage" / "history.json"
+
+
+def sanitize_sample(raw: object) -> Sample | None:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)) or len(raw) != 3:
+        return None
+    at = bounded_integer(raw[0], 1, MAX_RESET_TIMESTAMP)
+    if at is None:
+        return None
+    primary = bounded_percent(raw[1])
+    if primary is None:
+        return None
+    secondary = bounded_percent(raw[2]) if raw[2] is not None else None
+    return [at, primary, secondary]
+
+
+def sanitize_samples(raw: object) -> list[Sample]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+    samples = [
+        sample
+        for sample in (sanitize_sample(entry) for entry in raw[-MAX_HISTORY_SAMPLES:])
+        if sample is not None
+    ]
+    # Ascending, strictly increasing timestamps keep the plot monotonic in time
+    # even if a file was hand-edited or two writers interleaved.
+    ordered: list[Sample] = []
+    for sample in sorted(samples, key=lambda entry: entry[0] or 0):
+        if ordered and ordered[-1][0] == sample[0]:
+            ordered[-1] = sample
+        else:
+            ordered.append(sample)
+    return ordered
+
+
+def prune_samples(
+    samples: Sequence[Sample],
+    now: float,
+    *,
+    span: float = HISTORY_SPAN_SECONDS,
+) -> list[Sample]:
+    """Trim to the plotted window, keeping one older sample as its left edge.
+
+    Without that carried-over sample a series whose value has not changed for
+    hours would have nothing to draw at the start of the window.
+    """
+    cutoff = now - span
+    inside = [sample for sample in samples if (sample[0] or 0) >= cutoff]
+    outside = [sample for sample in samples if (sample[0] or 0) < cutoff]
+    kept = ([outside[-1]] if outside else []) + inside
+    return kept[-MAX_HISTORY_SAMPLES:]
+
+
+def append_sample(
+    samples: Sequence[Sample],
+    payload: Mapping[str, object],
+    now: float,
+    *,
+    span: float = HISTORY_SPAN_SECONDS,
+    min_interval: float = HISTORY_MIN_INTERVAL,
+) -> list[Sample]:
+    """Record a reading, skipping unchanged ones inside the coalescing window."""
+    primary = bounded_percent(payload.get("percent"))
+    at = bounded_integer(now, 1, MAX_RESET_TIMESTAMP)
+    existing = prune_samples(samples, now, span=span)
+    if primary is None or at is None:
+        return existing
+    secondary = bounded_percent(payload.get("secondaryPercent"))
+    last = existing[-1] if existing else None
+    if last is not None:
+        if at <= (last[0] or 0):
+            return existing
+        unchanged = last[1] == primary and last[2] == secondary
+        if unchanged and at - (last[0] or 0) < min_interval:
+            return existing
+    return prune_samples([*existing, [at, primary, secondary]], now, span=span)
+
+
+def read_history(path: Path) -> dict[str, list[Sample]]:
+    try:
+        if path.stat().st_size > MAX_HISTORY_BYTES:
+            return {}
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(raw, Mapping) or raw.get("version") != HISTORY_VERSION:
+        return {}
+    providers = raw.get("providers")
+    if not isinstance(providers, Mapping):
+        return {}
+    return {
+        str(name): sanitize_samples(samples) for name, samples in providers.items()
+    }
+
+
+def write_history(path: Path, providers: Mapping[str, Sequence[Sample]]) -> None:
+    payload = {
+        "version": HISTORY_VERSION,
+        "providers": {name: list(samples) for name, samples in providers.items()},
+    }
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".usage-history-",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            json.dump(payload, temporary, separators=(",", ":"))
+            temporary.write("\n")
+        os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, path)
+    finally:
+        if temporary_name:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def codex_requests() -> list[JsonObject]:
     return [
         {
@@ -380,14 +520,17 @@ class UsageCollector:
         wall_clock: Callable[[], float] = time.time,
         monotonic_clock: Callable[[], float] = time.monotonic,
         codex_refresh_interval: float = DEFAULT_CODEX_REFRESH_INTERVAL,
+        history_path: Path | None = None,
     ) -> None:
         self.claude_cache_path = claude_cache_path or default_claude_cache_path()
+        self.history_path = history_path or default_history_path()
         self.codex_fetcher = codex_fetcher
         self.wall_clock = wall_clock
         self.monotonic_clock = monotonic_clock
         self.codex_refresh_interval = codex_refresh_interval
         self.cached_codex: ProviderUsage | None = None
         self.last_codex_attempt = float("-inf")
+        self.history = read_history(self.history_path)
 
     def snapshot(self) -> JsonObject:
         monotonic_now = self.monotonic_clock()
@@ -397,10 +540,30 @@ class UsageCollector:
                 self.cached_codex = fresh
             self.last_codex_attempt = monotonic_now
         now = self.wall_clock()
-        return {
+        payloads = {
             "claude": provider_payload(read_claude_cache(self.claude_cache_path, now=now)),
             "codex": provider_payload(expire_provider(self.cached_codex, now)),
         }
+        self.record_history(payloads, now)
+        return {
+            name: {**payload, "history": self.history.get(name, [])}
+            for name, payload in payloads.items()
+        }
+
+    def record_history(self, payloads: Mapping[str, JsonObject], now: float) -> None:
+        updated = {
+            name: append_sample(self.history.get(name, []), payload, now)
+            for name, payload in payloads.items()
+        }
+        if updated == self.history:
+            return
+        self.history = updated
+        # A history file the bar cannot write is a cosmetic loss, never a
+        # reason to stop streaming live quota numbers.
+        try:
+            write_history(self.history_path, self.history)
+        except OSError:
+            pass
 
 
 def emit_stream(collector: UsageCollector, interval: float) -> None:

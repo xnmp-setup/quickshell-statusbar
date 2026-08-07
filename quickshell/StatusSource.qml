@@ -23,6 +23,8 @@ Scope {
         gpuTemp: null
     })
     property var workspaces: []
+    // Per-provider quota, plus the timestamped consumption history the stream
+    // persists across restarts: [{at, percent, secondaryPercent}], oldest first.
     property var usage: ({
         claude: {
             percent: null,
@@ -30,7 +32,8 @@ Scope {
             windowMinutes: null,
             secondaryPercent: null,
             secondaryResetsAt: null,
-            secondaryWindowMinutes: null
+            secondaryWindowMinutes: null,
+            history: []
         },
         codex: {
             percent: null,
@@ -38,7 +41,8 @@ Scope {
             windowMinutes: null,
             secondaryPercent: null,
             secondaryResetsAt: null,
-            secondaryWindowMinutes: null
+            secondaryWindowMinutes: null,
+            history: []
         }
     })
     property var themeColors: ({
@@ -50,17 +54,16 @@ Scope {
         text: "#d8dce8",
         text_dim: "#8088b4"
     })
-    // Rolling per-series samples, oldest first, for the tooltip graphs.
-    // Metrics arrive every second; usage arrives every 30 seconds.
+    // Rolling metric samples, oldest first, for the tooltip graphs. Metrics
+    // arrive every second. Quota history is timestamped and owned by the usage
+    // stream instead, so that it survives a bar restart.
     property var history: ({
         cpu: [],
         ram: [],
         io: [],
         gpu: [],
         wifi: [],
-        battery: [],
-        claude: [],
-        codex: []
+        battery: []
     })
     readonly property int historyLimit: 180
     property string lastWorkspaceJson: "[]"
@@ -124,10 +127,6 @@ Scope {
         if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot))
             return;
         root.usage = Sanitizer.normalizeUsage(root.usage, snapshot);
-        root.pushHistory({
-            claude: root.usage.claude.percent,
-            codex: root.usage.codex.percent
-        });
     }
 
     Process {

@@ -136,7 +136,8 @@ Item {
     }
 
     ThemedToolTip {
-        visible: root.hoverActive && root.tooltip.length > 0
+        shown: root.hoverActive && root.tooltip.length > 0
+        hostItem: root
         text: root.tooltip
         themeColors: root.themeColors
         history: root.history

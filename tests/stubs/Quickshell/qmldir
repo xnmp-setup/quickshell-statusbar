@@ -1,0 +1,4 @@
+module Quickshell
+PopupWindow 1.0 PopupWindow.qml
+Edges 1.0 Edges.qml
+PopupAdjustment 1.0 PopupAdjustment.qml
