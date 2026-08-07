@@ -6,9 +6,19 @@ Item {
 
     required property var themeColors
 
+    // Right-clicking the clock is the way into the bar's settings; x is in
+    // cell coordinates so the menu can open where the click landed.
+    signal menuRequested(real x)
+
     // Two 10px Row gaps plus the 1px divider.
     implicitWidth: timeText.implicitWidth + dateText.implicitWidth + 21
     implicitHeight: 40
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        onClicked: mouse => root.menuRequested(mouse.x)
+    }
 
     SystemClock {
         id: clock

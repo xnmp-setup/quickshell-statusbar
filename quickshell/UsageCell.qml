@@ -10,46 +10,48 @@ Item {
     property bool compact: false
     property bool last: false
     property double nowEpoch: Date.now() / 1000
-    // Trailing window plotted by the hover graphs.
-    property int spanSeconds: 6 * 3600
+    // Each quota window is plotted over a horizon that suits how fast it
+    // moves: the long window creeps and needs hours of context, while the
+    // short one can swing through its whole range within its own reset cycle.
+    property int primarySpanSeconds: 4 * 3600
+    property int secondarySpanSeconds: 3600
     property int graphBuckets: 96
     // Quota percentages are whole numbers that creep, so a rate measured over
     // one sample is a spike train. An hour of lookback resolves it to 1 %/h.
     property int rateLookbackSeconds: 3600
-    readonly property int bucketSeconds: spanSeconds / (graphBuckets - 1)
+    readonly property real primaryBucketSeconds: primarySpanSeconds / (graphBuckets - 1)
     // Timestamped {at, percent, secondaryPercent} samples from the usage
     // stream, oldest first, spanning the last several hours.
     readonly property var history: usage && usage.history ? usage.history : []
     readonly property var primarySeries: StatusGraph.resample(
-        history, "percent", nowEpoch, spanSeconds, graphBuckets
+        history, "percent", nowEpoch, primarySpanSeconds, graphBuckets
     )
     readonly property var secondarySeries: StatusGraph.resample(
-        history, "secondaryPercent", nowEpoch, spanSeconds, graphBuckets
+        history, "secondaryPercent", nowEpoch, secondarySpanSeconds, graphBuckets
     )
-    readonly property string spanLabel: Math.round(spanSeconds / 3600) + "h ago"
     readonly property var graphSeries: {
         const series = [{
             label: windowTitle(usage ? usage.windowMinutes : null) + " · % USED",
             values: primarySeries,
             smoothed: false,
-            span: spanLabel
+            span: spanLabel(primarySpanSeconds)
         }];
         if (StatusGraph.finiteCount(secondarySeries) >= 2) {
             series.push({
                 label: windowTitle(usage.secondaryWindowMinutes) + " · % USED",
                 values: secondarySeries,
                 smoothed: false,
-                span: spanLabel
+                span: spanLabel(secondarySpanSeconds)
             });
         }
         series.push({
             label: "BURN RATE · % PER HOUR",
             // Already a trailing average by construction, so no overlay.
             values: StatusGraph.ratePerHour(
-                primarySeries, bucketSeconds, rateLookbackSeconds
+                primarySeries, primaryBucketSeconds, rateLookbackSeconds
             ),
             smoothed: false,
-            span: spanLabel
+            span: spanLabel(primarySpanSeconds)
         });
         return series;
     }
@@ -76,6 +78,12 @@ Item {
         if (minutes % 60 === 0)
             return minutes / 60 + "-hour window";
         return minutes + "-minute window";
+    }
+
+    function spanLabel(seconds: int): string {
+        return seconds % 3600 === 0
+            ? seconds / 3600 + "h ago"
+            : Math.round(seconds / 60) + "m ago";
     }
 
     function windowTitle(minutes: var): string {

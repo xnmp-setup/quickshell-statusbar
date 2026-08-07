@@ -27,5 +27,6 @@ Item {
     }
 
     property color color: "transparent"
+    property bool grabFocus: false
     readonly property PopupAnchor anchor: PopupAnchor {}
 }

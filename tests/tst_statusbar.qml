@@ -65,6 +65,23 @@ TestCase {
     }
 
     Component {
+        id: autoHideComponent
+
+        AutoHideController {
+            hideDelay: 40
+        }
+    }
+
+    Component {
+        id: settingsMenuComponent
+
+        SettingsMenu {
+            themeColors: testCase.themeColors
+            autoHide: false
+        }
+    }
+
+    Component {
         id: themedTooltipComponent
 
         ThemedToolTip {
@@ -608,8 +625,11 @@ TestCase {
         compare(tip.normalizedSeries[0].label, "1-WEEK · % USED");
         compare(tip.normalizedSeries[1].label, "5-HOUR · % USED");
         compare(tip.normalizedSeries[2].label, "BURN RATE · % PER HOUR");
-        // Every graph is captioned with the window it covers.
-        compare(tip.normalizedSeries[0].span, "6h ago");
+        // Each graph is captioned with the horizon it covers, and the fast
+        // window gets a tighter one than the slow window.
+        compare(tip.normalizedSeries[0].span, "4h ago");
+        compare(tip.normalizedSeries[1].span, "1h ago");
+        compare(tip.normalizedSeries[2].span, "4h ago");
         // The plot ends at the newest reading, not at an interpolated point.
         const cumulative = tip.normalizedSeries[0].values;
         compare(cumulative[cumulative.length - 1], 72);
@@ -645,6 +665,72 @@ TestCase {
 
         chip.hoverActive = false;
         tryCompare(tip, "opened", false);
+    }
+
+    function test_bar_stays_down_while_it_is_in_use(): void {
+        const hide = createTemporaryObject(autoHideComponent, this);
+        verify(hide !== null);
+        // Disabled, the bar is simply always there.
+        compare(hide.revealed, true);
+        hide.pointerOnBar = true;
+        hide.enabled = true;
+        compare(hide.revealed, true);
+
+        // Enabling with the pointer away withdraws it.
+        hide.pointerOnBar = false;
+        tryCompare(hide, "revealed", false);
+
+        // Touching the trigger strip brings it down, and it stays down once
+        // the pointer moves off the strip onto the bar itself.
+        hide.pointerOnStrip = true;
+        compare(hide.revealed, true);
+        hide.pointerOnBar = true;
+        hide.pointerOnStrip = false;
+        compare(hide.revealed, true);
+
+        // An open menu holds it down even with the pointer gone.
+        hide.pinned = true;
+        hide.pointerOnBar = false;
+        wait(120);
+        compare(hide.revealed, true);
+        hide.pinned = false;
+        tryCompare(hide, "revealed", false);
+
+        // Turning the setting off restores it immediately.
+        hide.enabled = false;
+        compare(hide.revealed, true);
+    }
+
+    function test_bar_survives_the_pointer_crossing_a_seam(): void {
+        const hide = createTemporaryObject(autoHideComponent, this, {
+            enabled: true,
+            pointerOnStrip: true
+        });
+        verify(hide !== null);
+        compare(hide.revealed, true);
+        // A gap of a few frames between leaving the strip and entering the
+        // bar must not make it flicker away.
+        hide.pointerOnStrip = false;
+        hide.pointerOnBar = true;
+        wait(80);
+        compare(hide.revealed, true);
+    }
+
+    function test_settings_menu_asks_for_the_opposite_of_what_is_set(): void {
+        const menu = createTemporaryObject(settingsMenuComponent, this);
+        verify(menu !== null);
+        const seen = [];
+        menu.autoHideRequested.connect(value => seen.push(value));
+
+        // The menu never writes the setting itself; it reports the intent and
+        // renders whatever comes back.
+        menu.toggleAutoHide();
+        compare(seen, [true]);
+        compare(menu.autoHide, false);
+
+        menu.autoHide = true;
+        menu.toggleAutoHide();
+        compare(seen, [true, false]);
     }
 
     function test_numeric_column_does_not_move_with_digit_count(): void {
