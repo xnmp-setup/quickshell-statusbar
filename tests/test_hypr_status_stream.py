@@ -463,6 +463,35 @@ class WorkspaceTest(unittest.TestCase):
         )
         self.assertEqual(ghostty.ghostty_agent_kind("❯ shell"), "")
 
+    def test_a_trailing_shell_identity_tag_does_not_disturb_ghostty_parsing(self) -> None:
+        # Hyprland session restore (dot_config/zsh/ghostty-title-tags.zsh in the
+        # dotfiles repo) appends a "pid:N" tag after everything else, so a shell
+        # can be matched to the window it is visible in. Two invariants keep
+        # that from colliding with what is parsed here: the extra payload is
+        # ignored rather than mistaken for an agent kind, and ghostty titles are
+        # read through strip_invisible_metadata, which removes *every* tag run —
+        # not through the wezterm path, whose regex is anchored at the end of
+        # the string and would happily match this one.
+        title = "✽︎ chezmoi⁣⁤⁣" + self.invisible_tag(
+            "claude"
+        ) + self.invisible_tag("pid:840747")
+        self.assertEqual(ghostty.ghostty_agent_kind(title), "claude")
+        self.assertEqual(ghostty.ghostty_agent_state(title), "working")
+        self.assertEqual(ghostty.strip_invisible_metadata(title), "✽︎ chezmoi")
+        self.assertEqual(ghostty.ghostty_activity(title).title, "chezmoi")
+        # A shell with no agent running carries only the identity tag.
+        plain = "❯ chezmoi⁣⁤⁣" + self.invisible_tag("pid:840747")
+        self.assertEqual(ghostty.ghostty_agent_kind(plain), "")
+        self.assertEqual(ghostty.strip_invisible_metadata(plain), "❯ chezmoi")
+
+    def test_a_ghostty_identity_tag_is_not_read_as_a_wezterm_window_id(self) -> None:
+        self.assertIsNone(
+            status.wezterm_window_id_from_title("❯ chezmoi" + self.invisible_tag("pid:123"))
+        )
+        self.assertEqual(
+            status.wezterm_window_id_from_title("editing" + self.window_tag(3)), 3
+        )
+
     def test_ghostty_bus_is_selected_by_hyprland_pid(self) -> None:
         listing = ":1.12 41 other user\n:1.13 42 ghostty user\n"
         self.assertEqual(ghostty.ghostty_bus_names(listing, {42}), [":1.13"])
