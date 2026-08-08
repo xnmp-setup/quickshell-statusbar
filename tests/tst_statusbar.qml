@@ -35,6 +35,16 @@ TestCase {
     }
 
     Component {
+        id: wifiGlyphComponent
+
+        WifiGlyph {
+            connected: true
+            strength: 100
+            glyphColor: "#ebdbb2"
+        }
+    }
+
+    Component {
         id: workspaceComponent
 
         WorkspaceContextMenu {
@@ -83,6 +93,7 @@ TestCase {
             themeColors: testCase.themeColors
             autoHide: false
             showFocus: false
+            transparency: 0
         }
     }
 
@@ -292,6 +303,37 @@ TestCase {
         compare(critical.temperatureText, "91°");
     }
 
+    function test_compact_metric_can_encode_state_without_visible_value(): void {
+        const cell = createTemporaryObject(metricComponent, this, {
+            value: 84,
+            iconText: StatusIcons.wifiIcon(true, 84),
+            compact: true,
+            valueVisible: false,
+            dividerVisible: false
+        });
+        verify(cell !== null);
+        compare(cell.implicitWidth, 40);
+        compare(cell.displayText, "84%");
+        compare(cell.dividerVisible, false);
+    }
+
+    function test_dense_metric_removes_unused_gutter_but_keeps_temperature(): void {
+        const cool = createTemporaryObject(metricComponent, this, {
+            value: 42,
+            dense: true
+        });
+        const hot = createTemporaryObject(metricComponent, this, {
+            value: 42,
+            temperature: 78,
+            dense: true
+        });
+        verify(cool !== null);
+        verify(hot !== null);
+        compare(cool.implicitWidth, 68);
+        compare(hot.implicitWidth, 102);
+        compare(hot.temperatureText, "78°");
+    }
+
     function test_moving_average_smooths_and_keeps_alignment(): void {
         compare(StatusGraph.movingAverage([], 3), []);
         compare(StatusGraph.movingAverage([10], 3), [10]);
@@ -353,6 +395,28 @@ TestCase {
         compare(StatusIcons.wifiIcon(true, 40), "\u{f0922}");
         compare(StatusIcons.wifiIcon(true, 60), "\u{f0925}");
         compare(StatusIcons.wifiIcon(true, 95), "\u{f0928}");
+    }
+
+    function test_wifi_glyph_encodes_strength_with_one_to_three_arcs(): void {
+        const low = createTemporaryObject(wifiGlyphComponent, this, { strength: 10 });
+        const medium = createTemporaryObject(wifiGlyphComponent, this, { strength: 50 });
+        const high = createTemporaryObject(wifiGlyphComponent, this, { strength: 84 });
+        const off = createTemporaryObject(wifiGlyphComponent, this, {
+            connected: false,
+            strength: 84
+        });
+        verify(low !== null);
+        verify(medium !== null);
+        verify(high !== null);
+        verify(off !== null);
+        compare(low.arcCount, 1);
+        compare(medium.arcCount, 2);
+        compare(high.arcCount, 3);
+        compare(off.arcCount, 0);
+    }
+
+    function test_io_activity_uses_a_single_tray_glyph(): void {
+        compare(StatusIcons.ioActivityIcon(), "\u{f0430}");
     }
 
     function test_battery_icon_tracks_charge_and_charging_state(): void {
@@ -1027,6 +1091,18 @@ TestCase {
         menu.showFocus = true;
         menu.toggleShowFocus();
         compare(focusSeen, [true, false]);
+
+        // Transparency is clamped and follows the same report-intent contract.
+        const transparencySeen = [];
+        menu.transparencyRequested.connect(value => transparencySeen.push(value));
+        menu.requestTransparency(0.42);
+        menu.requestTransparency(-1);
+        menu.requestTransparency(2);
+        compare(transparencySeen, [0.42, 0, 1]);
+        compare(menu.transparency, 0);
+        compare(menu.transparencyText, "0%");
+        menu.transparency = 0.42;
+        compare(menu.transparencyText, "42%");
     }
 
     function test_numeric_column_does_not_move_with_digit_count(): void {
@@ -1301,6 +1377,24 @@ TestCase {
         compare(cell.resetText, "↻ <1m");
     }
 
+    function test_stacked_usage_keeps_percent_and_coarse_countdown_visible(): void {
+        const cell = createTemporaryObject(usageCellComponent, this, {
+            stacked: true,
+            dividerVisible: false,
+            nowEpoch: 1800000000,
+            usage: {
+                percent: 8,
+                resetsAt: 1800445260,
+                windowMinutes: 10080
+            }
+        });
+        verify(cell !== null);
+        compare(cell.implicitWidth, 96);
+        compare(cell.percentText, "8%");
+        compare(cell.compactResetText, "5d 3h");
+        compare(cell.dividerVisible, false);
+    }
+
     function test_usage_color_reflects_consumed_quota_thresholds(): void {
         const low = createTemporaryObject(usageCellComponent, this, {
             usage: { percent: 24, resetsAt: 1800000600, windowMinutes: 300 }
@@ -1338,36 +1432,17 @@ TestCase {
             >= StatusLayout.clockRight(width, clockWidth) + minimumGap);
     }
 
-    function test_2560_layout_keeps_full_usage_cluster_clear_of_clock(): void {
-        const width = 2560;
-        const clockWidth = 180;
-        // Six cells, both hot-temperature extensions, both full usage cells.
-        const rightRegionWidth = 6 * 96 + 2 * 34 + 2 * 188;
-        verify(StatusLayout.rightRegionClearsClock(
-            width,
-            clockWidth,
-            rightRegionWidth,
-            12,
-            12
-        ));
-    }
-
-    function test_1920_layout_uses_compact_usage_without_covering_clock(): void {
+    function test_1920_layout_keeps_dense_tray_clear_of_clock(): void {
         const width = 1920;
         const clockWidth = 180;
-        const fullRegionWidth = 6 * 96 + 2 * 34 + 2 * 188;
-        const compactRegionWidth = 6 * 96 + 2 * 34 + 2 * 39;
-        verify(!StatusLayout.rightRegionClearsClock(
-            width,
-            clockWidth,
-            fullRegionWidth,
-            12,
-            12
-        ));
+        // CPU and GPU include hot-temperature extensions. IO and Wi-Fi are
+        // glyph-only; battery is compact; both usage cells are stacked.
+        const denseRegionWidth = 102 + 68 + 32 + 102 + 32 + 58
+            + 2 * 88 + 32;
         verify(StatusLayout.rightRegionClearsClock(
             width,
             clockWidth,
-            compactRegionWidth,
+            denseRegionWidth,
             12,
             12
         ));
@@ -1520,6 +1595,19 @@ TestCase {
         compare(StatusFormat.countdownText("1800000600", now), "waiting");
         compare(StatusFormat.countdownText(NaN, now), "waiting");
         compare(StatusFormat.countdownText(Infinity, now), "waiting");
+    }
+
+    function test_compact_countdown_omits_minutes_until_final_hour(): void {
+        const now = 1800000000;
+        compare(StatusFormat.compactCountdownText(now + 445260, now), "5d 3h");
+        compare(StatusFormat.compactCountdownText(now + 86400, now), "1d 0h");
+        compare(StatusFormat.compactCountdownText(now + 3660, now), "1h");
+        compare(StatusFormat.compactCountdownText(now + 3599, now), "59m");
+        compare(StatusFormat.compactCountdownText(now + 120, now), "2m");
+        compare(StatusFormat.compactCountdownText(now + 59, now), "<1m");
+        compare(StatusFormat.compactCountdownText(now - 1, now), "<1m");
+        compare(StatusFormat.compactCountdownText(null, now), "waiting");
+        compare(StatusFormat.compactCountdownText(NaN, now), "waiting");
     }
 
     function test_percent_and_reset_text_fall_back_when_unknown(): void {

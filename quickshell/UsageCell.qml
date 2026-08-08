@@ -10,7 +10,9 @@ Item {
     required property var usage
     required property var themeColors
     property bool compact: false
+    property bool stacked: false
     property bool last: false
+    property bool dividerVisible: !last
     property double nowEpoch: Date.now() / 1000
     // Each quota window is plotted over a horizon that suits how fast it
     // moves: the long window creeps and needs hours of context, while the
@@ -78,6 +80,9 @@ Item {
     readonly property var resetsAt: usage ? usage.resetsAt : null
     readonly property string percentText: StatusFormat.percentText(percent)
     readonly property string resetText: StatusFormat.resetText(resetsAt, nowEpoch)
+    readonly property string compactResetText: StatusFormat.compactCountdownText(
+        resetsAt, nowEpoch
+    )
     readonly property color displayColor: percentageColor()
     readonly property real percentColumnX: percentLabel.mapToItem(root, 0, 0).x
     readonly property real resetColumnX: resetLabel.mapToItem(root, 0, 0).x
@@ -112,7 +117,7 @@ Item {
         );
     }
 
-    implicitWidth: compact ? 39 : 188
+    implicitWidth: stacked ? 96 : (compact ? 39 : 188)
     implicitHeight: 40
 
     Timer {
@@ -123,7 +128,7 @@ Item {
     }
 
     Rectangle {
-        visible: !root.last
+        visible: root.dividerVisible
         anchors {
             right: parent.right
             verticalCenter: parent.verticalCenter
@@ -134,6 +139,7 @@ Item {
     }
 
     Row {
+        visible: !root.stacked
         anchors.centerIn: parent
         spacing: root.compact ? 2 : 4
 
@@ -188,6 +194,47 @@ Item {
             font.family: "Inter"
             font.pixelSize: 10
             font.weight: Font.Medium
+        }
+    }
+
+    Row {
+        visible: root.stacked
+        anchors.centerIn: parent
+        spacing: 5
+
+        Image {
+            anchors.verticalCenter: parent.verticalCenter
+            width: 17
+            height: width
+            source: root.provider === "claude"
+                ? "assets/claude.png"
+                : "assets/openai.svg"
+            fillMode: Image.PreserveAspectFit
+            mipmap: true
+        }
+
+        Column {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: -1
+
+            Text {
+                width: 66
+                text: root.percentText
+                color: root.displayColor
+                font.family: "JetBrains Mono"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+            }
+
+            Text {
+                width: 66
+                text: root.compactResetText
+                color: root.themeColors.text_dim
+                opacity: 0.7
+                font.family: "Inter"
+                font.pixelSize: 10
+                font.weight: Font.Medium
+            }
         }
     }
 

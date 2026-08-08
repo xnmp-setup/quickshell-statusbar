@@ -20,6 +20,12 @@ const BATTERY_STEPS = [
 // nf-md-bell_outline and nf-md-weather_night, the Focus/do-not-disturb pair.
 const BELL_OUTLINE = "\u{f009c}";
 const WEATHER_NIGHT = "\u{f0594}";
+// nf-md-pulse: a quiet activity-only glyph for disk I/O.
+const IO_ACTIVITY = "\u{f0430}";
+
+function ioActivityIcon() {
+    return IO_ACTIVITY;
+}
 
 function focusIcon(dnd) {
     return dnd ? WEATHER_NIGHT : BELL_OUTLINE;

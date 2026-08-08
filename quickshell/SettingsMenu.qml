@@ -10,6 +10,7 @@ HoverPopup {
 
     required property bool autoHide
     required property bool showFocus
+    required property real transparency
 
     // True while the pointer is on the bar the menu hangs from. The menu stays
     // put whenever the pointer is on either of them, so the gap between the
@@ -25,7 +26,10 @@ HoverPopup {
 
     signal autoHideRequested(bool value)
     signal showFocusRequested(bool value)
+    signal transparencyRequested(real value)
     signal dismissed
+
+    readonly property string transparencyText: Math.round(transparency * 100) + "%"
 
     readonly property int rowWidth: 268
 
@@ -42,6 +46,10 @@ HoverPopup {
 
     function toggleShowFocus(): void {
         showFocusRequested(!showFocus);
+    }
+
+    function requestTransparency(value: real): void {
+        transparencyRequested(Math.max(0, Math.min(1, value)));
     }
 
     component CheckRow: Item {
@@ -125,6 +133,93 @@ HoverPopup {
         }
     }
 
+    component SliderRow: Item {
+        id: sliderRow
+
+        required property string label
+        required property real value
+
+        signal adjusted(real value)
+
+        width: menu.rowWidth
+        height: 48
+
+        function adjustAt(position: real): void {
+            adjusted(Math.max(0, Math.min(1, position / sliderTrack.width)));
+        }
+
+        Text {
+            anchors.left: parent.left
+            text: sliderRow.label
+            color: menu.themeColors.text
+            font.family: "Inter"
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+        }
+
+        Text {
+            anchors.right: parent.right
+            text: Math.round(sliderRow.value * 100) + "%"
+            color: menu.themeColors.text_dim
+            font.family: "JetBrains Mono"
+            font.pixelSize: 10
+            font.weight: Font.Medium
+        }
+
+        Rectangle {
+            id: sliderTrack
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                bottomMargin: 9
+            }
+            height: 4
+            radius: 2
+            color: menu.themeColors.border
+
+            Rectangle {
+                width: parent.width * sliderRow.value
+                height: parent.height
+                radius: parent.radius
+                color: menu.themeColors.accent
+            }
+
+            Rectangle {
+                x: Math.max(0, Math.min(parent.width - width,
+                    parent.width * sliderRow.value - width / 2))
+                anchors.verticalCenter: parent.verticalCenter
+                width: 12
+                height: 12
+                radius: 6
+                color: menu.themeColors.text
+                border.width: 1
+                border.color: menu.themeColors.background
+            }
+        }
+
+        MouseArea {
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: 28
+            cursorShape: Qt.PointingHandCursor
+            onPressed: mouse => sliderRow.adjustAt(
+                mapToItem(sliderTrack, mouse.x, mouse.y).x
+            )
+            onPositionChanged: mouse => {
+                if (pressed) {
+                    sliderRow.adjustAt(
+                        mapToItem(sliderTrack, mouse.x, mouse.y).x
+                    );
+                }
+            }
+        }
+    }
+
     // Clicking is deliberate, so there is nothing to debounce. Sitting flush
     // against the bar leaves no dead strip for the pointer to cross.
     delay: 0
@@ -183,6 +278,12 @@ HoverPopup {
             hint: "Do-not-disturb cell at the right end of the bar"
             checked: menu.showFocus
             onToggled: menu.toggleShowFocus()
+        }
+
+        SliderRow {
+            label: "Bar transparency"
+            value: menu.transparency
+            onAdjusted: value => menu.requestTransparency(value)
         }
     }
 }

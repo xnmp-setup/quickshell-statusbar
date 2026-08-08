@@ -28,22 +28,6 @@ PanelWindow {
     readonly property bool showGpuTemp: statusSource.metrics.gpuTemp !== null
         && statusSource.metrics.gpuTemp !== undefined
     readonly property bool showLaptop: statusSource.metrics.laptop === true
-    readonly property int metricCellCount: 4 + (showLaptop ? 2 : 0)
-    readonly property int metricCellWidth: 96
-    // Hot temperatures widen their host cell instead of adding a cell.
-    readonly property int temperatureExtraWidth: (showCpuTemp ? 34 : 0)
-        + (showGpuTemp ? 34 : 0)
-    readonly property int usageCellWidth: 188
-    readonly property int compactUsageCellWidth: 39
-    readonly property int focusCellWidth: settings.showFocus ? 40 : 0
-    readonly property bool compactUsage: !StatusLayout.rightRegionClearsClock(
-        width,
-        clockCell.implicitWidth,
-        focusCellWidth + metricCellCount * metricCellWidth + temperatureExtraWidth
-            + 2 * usageCellWidth,
-        12,
-        12
-    )
     // An auto-hiding bar withdraws off screen and claims no exclusive zone, so
     // windows fill the display exactly as they would with no bar at all.
     readonly property bool collapsed: !autoHide.revealed
@@ -163,6 +147,7 @@ PanelWindow {
         Rectangle {
             anchors.fill: parent
             color: bar.themeColors.background
+            opacity: 1 - bar.settings.transparency
         }
 
         Rectangle {
@@ -230,8 +215,10 @@ PanelWindow {
             pointerX: bar.settingsMenuX
             autoHide: bar.settings.autoHide
             showFocus: bar.settings.showFocus
+            transparency: bar.settings.transparency
             onAutoHideRequested: value => bar.settings.setAutoHide(value)
             onShowFocusRequested: value => bar.settings.setShowFocus(value)
+            onTransparencyRequested: value => bar.settings.setTransparency(value)
             onDismissed: shown = false
         }
 
@@ -251,6 +238,7 @@ PanelWindow {
 
                 MetricCell {
                     label: "CPU"
+                    dense: true
                     value: bar.statusSource.metrics.cpu
                     temperature: bar.statusSource.metrics.cpuTemp
                     tooltip: bar.showCpuTemp
@@ -259,24 +247,33 @@ PanelWindow {
                     themeColors: bar.themeColors
                     history: bar.statusSource.history.cpu
                     smoothHistory: true
+                    dividerVisible: false
                 }
                 MetricCell {
                     label: "RAM"
+                    dense: true
                     value: bar.statusSource.metrics.ram
                     tooltip: "Used memory, excluding readily reclaimable cache"
                     themeColors: bar.themeColors
                     history: bar.statusSource.history.ram
+                    dividerVisible: false
                 }
                 MetricCell {
                     label: "IO"
+                    iconText: StatusIcons.ioActivityIcon()
                     value: bar.statusSource.metrics.io
                     tooltip: bar.statusSource.metrics.ioTooltip || "Time tasks were stalled on disk I/O"
                     themeColors: bar.themeColors
                     history: bar.statusSource.history.io
                     smoothHistory: true
+                    compact: true
+                    valueVisible: false
+                    dividerVisible: false
+                    Layout.preferredWidth: 32
                 }
                 MetricCell {
                     label: "GPU"
+                    dense: true
                     value: bar.statusSource.metrics.gpu
                     temperature: bar.statusSource.metrics.gpuTemp
                     tooltip: bar.showGpuTemp
@@ -285,16 +282,23 @@ PanelWindow {
                     themeColors: bar.themeColors
                     history: bar.statusSource.history.gpu
                     smoothHistory: true
+                    dividerVisible: false
                 }
 
                 Loader {
                     active: bar.showLaptop
+                    Layout.preferredWidth: active ? 32 : 0
                     sourceComponent: MetricCell {
+                        id: wifiCell
+
                         label: "WIFI"
-                        iconText: StatusIcons.wifiIcon(
-                            bar.statusSource.metrics.wifiConnected,
-                            bar.statusSource.metrics.wifi
-                        )
+                        customIcon: Component {
+                            WifiGlyph {
+                                connected: bar.statusSource.metrics.wifiConnected
+                                strength: bar.statusSource.metrics.wifi
+                                glyphColor: wifiCell.displayColor
+                            }
+                        }
                         value: bar.statusSource.metrics.wifi
                         formattedValue: bar.statusSource.metrics.wifiConnected
                             && value !== null && value !== undefined ? value + "%" : "OFF"
@@ -303,10 +307,14 @@ PanelWindow {
                         themeColors: bar.themeColors
                         history: bar.statusSource.history.wifi
                         smoothHistory: true
+                        compact: true
+                        valueVisible: false
+                        dividerVisible: false
                     }
                 }
                 Loader {
                     active: bar.showLaptop
+                    Layout.preferredWidth: active ? 58 : 0
                     sourceComponent: MetricCell {
                         label: "BAT"
                         iconText: StatusIcons.batteryIcon(
@@ -318,6 +326,8 @@ PanelWindow {
                         tooltip: bar.statusSource.metrics.batteryTooltip || "Battery status unavailable"
                         themeColors: bar.themeColors
                         history: bar.statusSource.history.battery
+                        compact: true
+                        dividerVisible: false
                     }
                 }
             }
@@ -326,15 +336,18 @@ PanelWindow {
                 provider: "claude"
                 usage: bar.statusSource.usage.claude
                 themeColors: bar.themeColors
-                compact: bar.compactUsage
+                stacked: true
+                dividerVisible: false
+                Layout.preferredWidth: 88
             }
 
             UsageCell {
                 provider: "codex"
                 usage: bar.statusSource.usage.codex
                 themeColors: bar.themeColors
-                compact: bar.compactUsage
-                last: !bar.settings.showFocus
+                stacked: true
+                dividerVisible: false
+                Layout.preferredWidth: 88
             }
 
             Loader {
@@ -343,6 +356,7 @@ PanelWindow {
                 // implicit width going to zero does not reliably trigger a
                 // relayout, leaving a 40px phantom slot at the bar's edge.
                 visible: active
+                Layout.preferredWidth: active ? 32 : 0
                 sourceComponent: FocusCell {
                     themeColors: bar.themeColors
                     available: bar.focusSource.available

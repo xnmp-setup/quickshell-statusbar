@@ -55,6 +55,24 @@ function countdownText(timestamp, nowEpoch) {
     return "<1m";
 }
 
+// Tray countdowns prioritize stability and density: minutes only matter in
+// the final hour. The detailed tooltip still exposes the absolute reset time.
+function compactCountdownText(timestamp, nowEpoch) {
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp))
+        return "waiting";
+    const remaining = Math.max(0, Math.floor(timestamp - nowEpoch));
+    const days = Math.floor(remaining / 86400);
+    const hours = Math.floor((remaining % 86400) / 3600);
+    const minutes = Math.floor((remaining % 3600) / 60);
+    if (days > 0)
+        return days + "d " + hours + "h";
+    if (hours > 0)
+        return hours + "h";
+    if (minutes > 0)
+        return minutes + "m";
+    return "<1m";
+}
+
 function percentText(percent) {
     return percent === null || percent === undefined ? "--" : percent + "%";
 }

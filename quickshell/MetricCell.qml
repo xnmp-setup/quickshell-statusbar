@@ -16,16 +16,28 @@ Item {
     property var temperature: null
     // Nerd Font glyph shown instead of the text label when the font exists.
     property string iconText: ""
+    // Optional code-native glyph for states that need more fidelity than a
+    // single font character can provide.
+    property Component customIcon: null
     // Recent samples for the hover graph; smoothHistory overlays a moving average.
     property var history: []
     property bool smoothHistory: false
     property bool last: false
+    // Compact cells reuse the metric's hover graph while rendering like a
+    // conventional tray item. Values can be omitted when the glyph itself
+    // communicates the state (Wi-Fi strength and disk activity).
+    property bool compact: false
+    property bool dense: false
+    property bool valueVisible: true
+    property bool dividerVisible: !last
+    property int customIconWidth: 17
     readonly property bool showTemperature: temperature !== null
         && temperature !== undefined
     // Hack Nerd Font is assumed by the WezTerm config on every platform, but a
     // machine without it degrades to the plain text label rather than tofu.
     readonly property bool iconAvailable: iconText.length > 0
         && Qt.fontFamilies().indexOf("Hack Nerd Font") !== -1
+    readonly property bool customIconAvailable: customIcon !== null
     readonly property color displayColor: severityColor(value, severity)
     readonly property string displayText: displayValueText.text
     readonly property string temperatureText: temperatureValueText.text
@@ -43,11 +55,13 @@ Item {
     // 71 px of fixed label/value content plus balanced outer gutters. The gutter
     // keeps dividers visually separate from both the preceding value and next label.
     // A visible hot temperature widens the cell by its own column.
-    implicitWidth: 96 + (showTemperature ? 34 : 0)
+    implicitWidth: compact
+        ? (valueVisible ? 68 : 40)
+        : (dense ? 68 : 96) + (showTemperature ? 34 : 0)
     implicitHeight: 40
 
     Rectangle {
-        visible: !root.last
+        visible: root.dividerVisible
         anchors {
             right: parent.right
             verticalCenter: parent.verticalCenter
@@ -59,15 +73,25 @@ Item {
 
     Row {
         anchors.centerIn: parent
-        spacing: 4
+        spacing: root.compact || root.dense ? 3 : 4
+
+        Loader {
+            visible: active
+            active: root.customIconAvailable
+            anchors.verticalCenter: parent.verticalCenter
+            width: active ? root.customIconWidth : 0
+            height: active ? 15 : 0
+            sourceComponent: root.customIcon
+        }
 
         Text {
-            width: 28
+            visible: !root.customIconAvailable
+            width: visible ? (root.compact || root.dense ? 24 : 28) : 0
             anchors.verticalCenter: parent.verticalCenter
             text: root.iconAvailable ? root.iconText : root.label
             color: root.iconAvailable ? root.displayColor : root.themeColors.text_dim
             opacity: root.iconAvailable ? 0.9 : 0.62
-            horizontalAlignment: Text.AlignRight
+            horizontalAlignment: root.compact ? Text.AlignHCenter : Text.AlignRight
             font.family: root.iconAvailable ? "Hack Nerd Font" : "Inter"
             font.pixelSize: root.iconAvailable ? 15 : 11
             font.weight: root.iconAvailable ? Font.Normal : Font.DemiBold
@@ -76,7 +100,10 @@ Item {
 
         Text {
             id: displayValueText
-            width: 38
+            visible: root.valueVisible
+            width: root.valueVisible
+                ? (root.compact || root.dense ? 32 : 38)
+                : 0
             anchors.verticalCenter: parent.verticalCenter
             clip: true
             elide: Text.ElideRight
@@ -92,8 +119,8 @@ Item {
 
         Text {
             id: temperatureValueText
-            visible: root.showTemperature
-            width: root.showTemperature ? 30 : 0
+            visible: root.valueVisible && !root.compact && root.showTemperature
+            width: visible ? 30 : 0
             anchors.verticalCenter: parent.verticalCenter
             clip: true
             text: root.showTemperature ? root.temperature + "°" : ""

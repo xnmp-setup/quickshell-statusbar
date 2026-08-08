@@ -15,6 +15,10 @@ Scope {
     readonly property bool autoHide: store.autoHide === true
     // Show the Focus (do-not-disturb) toggle at the right end of the bar.
     readonly property bool showFocus: store.showFocus === true
+    // Fraction of the background removed; text and controls remain opaque.
+    readonly property real transparency: Math.max(
+        0, Math.min(1, Number(store.transparency))
+    )
 
     function setAutoHide(value: bool): void {
         store.autoHide = value;
@@ -22,6 +26,10 @@ Scope {
 
     function setShowFocus(value: bool): void {
         store.showFocus = value;
+    }
+
+    function setTransparency(value: real): void {
+        store.transparency = Math.max(0, Math.min(1, value));
     }
 
     FileView {
@@ -42,6 +50,7 @@ Scope {
 
             property bool autoHide: false
             property bool showFocus: true
+            property real transparency: 0
         }
     }
 }
