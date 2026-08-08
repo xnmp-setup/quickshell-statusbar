@@ -9,6 +9,7 @@ import "../quickshell/StatusIcons.js" as StatusIcons
 import "../quickshell/StatusSeverity.js" as StatusSeverity
 import "../quickshell/StatusFormat.js" as StatusFormat
 import "../quickshell/StatusCommands.js" as StatusCommands
+import "../quickshell/FocusState.js" as FocusState
 
 TestCase {
     id: testCase
@@ -361,6 +362,147 @@ TestCase {
         compare(StatusIcons.batteryIcon(54, "discharging"), "\u{f007e}");
         compare(StatusIcons.batteryIcon(90, "full"), "\u{f0082}");
         compare(StatusIcons.batteryIcon(97, "full"), "\u{f0079}");
+    }
+
+    Component {
+        id: focusCellComponent
+
+        FocusCell {
+            themeColors: testCase.themeColors
+            width: implicitWidth
+            height: implicitHeight
+        }
+    }
+
+    function test_focus_toggle_reply_parses_one_mode_per_line(): void {
+        const idle = FocusState.parseToggleReply("default\n");
+        verify(idle.available);
+        verify(!idle.dnd);
+
+        const silenced = FocusState.parseToggleReply("default\ndo-not-disturb\n");
+        verify(silenced.available);
+        verify(silenced.dnd);
+
+        // Surrounding noise must not fabricate or hide the mode.
+        const padded = FocusState.parseToggleReply("  default \n\n do-not-disturb \n");
+        verify(padded.dnd);
+        verify(!FocusState.parseToggleReply("do-not-disturb-extra\n").dnd);
+        // An oversized-but-valid single mode still parses at the size limit.
+        verify(FocusState.parseToggleReply("x".repeat(4096)).available);
+    }
+
+    function test_focus_poll_reply_parses_the_busctl_modes_property(): void {
+        const idle = FocusState.parsePollReply("v as 1 \"default\"\n");
+        verify(idle.available);
+        verify(!idle.dnd);
+
+        const silenced = FocusState.parsePollReply(
+            "v as 2 \"default\" \"do-not-disturb\"\n");
+        verify(silenced.available);
+        verify(silenced.dnd);
+
+        // A daemon with every mode cleared is alive, just not focused.
+        const bare = FocusState.parsePollReply("v as 0\n");
+        verify(bare.available);
+        verify(!bare.dnd);
+
+        verify(!FocusState.parsePollReply("do-not-disturb").dnd);
+        verify(!FocusState.parsePollReply("Call failed: Destination does not exist").available);
+    }
+
+    function test_focus_bad_replies_read_as_unreachable(): void {
+        for (const reply of ["", "\n \n", null, undefined, 42, "x".repeat(5000)]) {
+            for (const parse of [FocusState.parsePollReply,
+                                 FocusState.parseToggleReply]) {
+                const state = parse(reply);
+                verify(!state.available, "available for " + reply);
+                verify(!state.dnd, "dnd for " + reply);
+            }
+        }
+    }
+
+    function test_focus_unreachable_reply_never_rewrites_known_dnd(): void {
+        // A transient read failure must not flip the cell to "off" and turn
+        // the next click into a disable of the Focus the user still has on.
+        const on = { available: true, dnd: true };
+        const dropped = FocusState.nextState(on, FocusState.parsePollReply(""));
+        verify(!dropped.available);
+        verify(dropped.dnd);
+
+        // A live reply is authoritative in both directions.
+        const cleared = FocusState.nextState(
+            dropped, FocusState.parsePollReply("as 1 \"default\""));
+        verify(cleared.available);
+        verify(!cleared.dnd);
+        verify(FocusState.nextState(
+            { available: true, dnd: false },
+            FocusState.parseToggleReply("do-not-disturb\n")).dnd);
+
+        // No history at all starts from "off".
+        verify(!FocusState.nextState(null, FocusState.parsePollReply("")).dnd);
+    }
+
+    function test_focus_commands_split_autostart_by_intent(): void {
+        // The poll must never resurrect a deliberately stopped daemon; the
+        // toggle is the one call where waking mako is wanted.
+        const query = FocusState.queryCommand();
+        compare(query[0], "busctl");
+        verify(query.indexOf("--auto-start=no") !== -1);
+        // busctl honors --auto-start only on the `call` verb; `get-property`
+        // activates the destination regardless.
+        verify(query.indexOf("call") !== -1);
+        verify(query.indexOf("get-property") === -1);
+        verify(query.indexOf("Modes") !== -1);
+        compare(FocusState.toggleCommand(),
+                ["makoctl", "mode", "-t", "do-not-disturb"]);
+    }
+
+    function test_focus_icon_distinguishes_states(): void {
+        compare(StatusIcons.focusIcon(false), "\u{f009c}");
+        compare(StatusIcons.focusIcon(true), "\u{f0594}");
+    }
+
+    // Synthetic pointer events do not deliver under the offscreen platform,
+    // so interaction rides the same hoverActive seam the metric cells use.
+    function test_focus_cell_hover_narrates_the_state_it_would_toggle(): void {
+        const cell = createTemporaryObject(focusCellComponent, this, {
+            available: true, dnd: false, hoverX: 12
+        });
+        const tip = tooltipOf(cell);
+        verify(tip !== null);
+        compare(tip.visible, false);
+
+        cell.hoverActive = true;
+        tryCompare(tip, "opened", true);
+        verify(cell.tooltip.indexOf("click to silence") !== -1);
+
+        cell.dnd = true;
+        verify(cell.tooltip.indexOf("silenced") !== -1);
+
+        // The unreachable cell keeps a tooltip: the click is what wakes mako.
+        cell.dnd = false;
+        cell.available = false;
+        verify(cell.tooltip.indexOf("unreachable") !== -1);
+
+        cell.hoverActive = false;
+        tryCompare(tip, "opened", false);
+    }
+
+    function test_focus_cell_reflects_state_in_glyph_and_color(): void {
+        const cell = createTemporaryObject(focusCellComponent, this, {
+            available: true, dnd: false
+        });
+        const offText = cell.displayText;
+        verify(offText.length > 0);
+        verify(Qt.colorEqual(cell.displayColor, testCase.themeColors.text_dim));
+        cell.dnd = true;
+        verify(Qt.colorEqual(cell.displayColor, testCase.themeColors.accent));
+        // The two states must be distinguishable by glyph when the icon font
+        // exists; without it both fall back to the label and color carries it.
+        if (cell.iconAvailable)
+            verify(cell.displayText !== offText);
+        else
+            compare(cell.displayText, "DND");
     }
 
     Component {

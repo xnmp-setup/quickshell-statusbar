@@ -17,6 +17,14 @@ const BATTERY_STEPS = [
     "\u{f007f}", "\u{f0080}", "\u{f0081}", "\u{f0082}"
 ];
 
+// nf-md-bell_outline and nf-md-weather_night, the Focus/do-not-disturb pair.
+const BELL_OUTLINE = "\u{f009c}";
+const WEATHER_NIGHT = "\u{f0594}";
+
+function focusIcon(dnd) {
+    return dnd ? WEATHER_NIGHT : BELL_OUTLINE;
+}
+
 function wifiIcon(connected, strength) {
     if (!connected)
         return WIFI_OFF;

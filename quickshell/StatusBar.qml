@@ -12,6 +12,7 @@ PanelWindow {
     required property bool barVisible
     required property string candidate
     required property var statusSource
+    required property var focusSource
     required property var settings
     required property int renameRequestSerial
     property int editingWorkspaceId: 0
@@ -33,10 +34,11 @@ PanelWindow {
         + (showGpuTemp ? 34 : 0)
     readonly property int usageCellWidth: 188
     readonly property int compactUsageCellWidth: 39
+    readonly property int focusCellWidth: 40
     readonly property bool compactUsage: !StatusLayout.rightRegionClearsClock(
         width,
         clockCell.implicitWidth,
-        metricCellCount * metricCellWidth + temperatureExtraWidth
+        focusCellWidth + metricCellCount * metricCellWidth + temperatureExtraWidth
             + 2 * usageCellWidth,
         12,
         12
@@ -239,6 +241,13 @@ PanelWindow {
             }
             spacing: 0
             z: 1
+
+            FocusCell {
+                themeColors: bar.themeColors
+                available: bar.focusSource.available
+                dnd: bar.focusSource.dnd
+                onToggled: bar.focusSource.toggle()
+            }
 
             RowLayout {
                 id: telemetry

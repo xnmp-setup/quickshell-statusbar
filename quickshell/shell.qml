@@ -21,6 +21,10 @@ ShellRoot {
         id: barSettings
     }
 
+    FocusSource {
+        id: focusControl
+    }
+
     IpcHandler {
         target: "bar"
 
@@ -51,6 +55,14 @@ ShellRoot {
         function renameCurrentWorkspace(): void {
             root.renameRequestSerial += 1;
         }
+
+        function toggleFocus(): void {
+            focusControl.toggle();
+        }
+
+        function focusEnabled(): bool {
+            return focusControl.dnd;
+        }
     }
 
     Variants {
@@ -63,6 +75,7 @@ ShellRoot {
             barVisible: root.barVisible
             candidate: root.candidate
             statusSource: source
+            focusSource: focusControl
             settings: barSettings
             renameRequestSerial: root.renameRequestSerial
         }

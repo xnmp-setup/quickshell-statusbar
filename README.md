@@ -44,6 +44,11 @@ qs -d -p ~/.config/quickshell/statusbar
 - `uv` at `~/.local/bin/uv` for the Python streams.
 - Hack Nerd Font for the Wi-Fi/battery icon cells; cells fall back to text
   labels when the font is missing.
+- `mako` for the Focus (do-not-disturb) cell, with a `[mode=do-not-disturb]`
+  `invisible=1` section in its config so the mode actually silences
+  notifications. The cell toggles `makoctl mode -t do-not-disturb` (also
+  reachable as `qs ipc call bar toggleFocus`) and shows an unreachable state
+  when mako is missing.
 - The WezTerm agent lifecycle hook (`wezterm-agent-status`) lives with the
   WezTerm configuration in the dotfiles repository; this bar only reads the
   runtime state files it writes under `$XDG_RUNTIME_DIR`.
