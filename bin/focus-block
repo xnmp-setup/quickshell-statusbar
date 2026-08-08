@@ -1,0 +1,85 @@
+#!/bin/sh
+# focus-block — toggle a managed "Focus" website block in /etc/hosts.
+#
+# `on`/`off` rewrite only the section between the two marker lines; every
+# other line in the hosts file is preserved. `status` prints on/off. Domains
+# come from <config-home>/focus-block/domains (one per line, `#` comments);
+# each valid domain blocks itself and its www. variant over IPv4 and IPv6.
+# Lines that are not a plausible domain are skipped, never written to hosts.
+#
+# Root runs (via the statusbar's sudoers entry) pin the hosts path and
+# resolve the domain list from the invoking user's home, ignoring the
+# FOCUS_BLOCK_* test overrides so the NOPASSWD entry cannot be steered at
+# another file.
+set -eu
+
+BEGIN_MARK="# >>> focus-block >>>"
+END_MARK="# <<< focus-block <<<"
+
+if [ "$(id -u)" -eq 0 ]; then
+    HOSTS_FILE=/etc/hosts
+    user_home=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)
+    DOMAINS_FILE="${user_home:-/root}/.config/focus-block/domains"
+else
+    HOSTS_FILE="${FOCUS_BLOCK_HOSTS:-/etc/hosts}"
+    DOMAINS_FILE="${FOCUS_BLOCK_DOMAINS:-${XDG_CONFIG_HOME:-$HOME/.config}/focus-block/domains}"
+fi
+
+valid_domains() {
+    [ -r "$DOMAINS_FILE" ] || return 0
+    sed 's/#.*//; s/[[:space:]]//g' "$DOMAINS_FILE" \
+        | grep -E '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$' || true
+}
+
+without_section() {
+    awk -v begin="$BEGIN_MARK" -v end="$END_MARK" '
+        $0 == begin { skip = 1; next }
+        $0 == end { skip = 0; next }
+        !skip
+    ' "$HOSTS_FILE"
+}
+
+write_hosts() {
+    tmp=$(mktemp "$HOSTS_FILE.XXXXXX")
+    cat > "$tmp"
+    chmod 644 "$tmp"
+    mv "$tmp" "$HOSTS_FILE"
+}
+
+block_section() {
+    echo "$BEGIN_MARK"
+    valid_domains | while IFS= read -r domain; do
+        echo "0.0.0.0 $domain"
+        echo ":: $domain"
+        case "$domain" in
+        www.*) ;;
+        *)
+            echo "0.0.0.0 www.$domain"
+            echo ":: www.$domain"
+            ;;
+        esac
+    done
+    echo "$END_MARK"
+}
+
+flush_dns_cache() {
+    resolvectl flush-caches 2>/dev/null || true
+}
+
+case "${1:-}" in
+on)
+    { without_section; block_section; } | write_hosts
+    flush_dns_cache
+    ;;
+off)
+    without_section | write_hosts
+    flush_dns_cache
+    ;;
+status)
+    if grep -qxF "$BEGIN_MARK" "$HOSTS_FILE"; then echo on; else echo off; fi
+    ;;
+*)
+    echo "usage: focus-block on|off|status" >&2
+    exit 64
+    ;;
+esac

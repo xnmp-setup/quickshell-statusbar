@@ -457,6 +457,15 @@ TestCase {
                 ["makoctl", "mode", "-t", "do-not-disturb"]);
     }
 
+    function test_focus_blocker_command_matches_the_sudoers_grant(): void {
+        // The argv must stay exactly what /etc/sudoers.d/focus-block allows,
+        // with -n so a missing grant fails instead of hanging on a prompt.
+        compare(FocusState.blockerCommand(true),
+                ["sudo", "-n", "/usr/local/bin/focus-block", "on"]);
+        compare(FocusState.blockerCommand(false),
+                ["sudo", "-n", "/usr/local/bin/focus-block", "off"]);
+    }
+
     function test_focus_icon_distinguishes_states(): void {
         compare(StatusIcons.focusIcon(false), "\u{f009c}");
         compare(StatusIcons.focusIcon(true), "\u{f0594}");

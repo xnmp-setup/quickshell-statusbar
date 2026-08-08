@@ -8,6 +8,18 @@ Scope {
 
     property bool available: false
     property bool dnd: false
+    property bool blockerSynced: false
+
+    // Focus also blocks the sites listed in ~/.config/focus-block/domains.
+    // Driving the blocker off observed state (not off the click) keeps it in
+    // sync with external toggles, and the first live reply reconciles a block
+    // left behind by a crash while Focus was on.
+    onDndChanged: syncBlocker()
+
+    function syncBlocker(): void {
+        blockerSynced = true;
+        Quickshell.execDetached(FocusState.blockerCommand(dnd));
+    }
 
     function toggle(): void {
         // A toggle already in flight will report the fresh state when it
@@ -26,6 +38,8 @@ Scope {
             { available: root.available, dnd: root.dnd }, parsed);
         root.available = state.available;
         root.dnd = state.dnd;
+        if (state.available && !root.blockerSynced)
+            root.syncBlocker();
     }
 
     Process {

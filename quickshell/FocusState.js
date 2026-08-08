@@ -33,6 +33,14 @@ function toggleCommand() {
     return ["makoctl", "mode", "-t", DND_MODE];
 }
 
+// The website blocker rides the observed dnd state rather than the click, so
+// external toggles (a keybind, makoctl in a terminal) stay in sync too. The
+// sudoers entry authorizes exactly these two argv shapes; -n keeps a
+// misconfigured sudo from hanging on a password prompt.
+function blockerCommand(active) {
+    return ["sudo", "-n", "/usr/local/bin/focus-block", active ? "on" : "off"];
+}
+
 function fromModes(modes) {
     return { available: true, dnd: modes.indexOf(DND_MODE) !== -1 };
 }

@@ -49,6 +49,18 @@ qs -d -p ~/.config/quickshell/statusbar
   notifications. The cell toggles `makoctl mode -t do-not-disturb` (also
   reachable as `qs ipc call bar toggleFocus`) and shows an unreachable state
   when mako is missing.
+- Focus also blocks the websites listed in `~/.config/focus-block/domains`
+  (one domain per line; the `www.` variant is added automatically) through a
+  marker-fenced section in `/etc/hosts`. That needs a one-time root setup:
+
+  ```sh
+  sudo install -o root -g root -m 755 bin/focus-block /usr/local/bin/focus-block
+  echo "$USER ALL=(root) NOPASSWD: /usr/local/bin/focus-block on, /usr/local/bin/focus-block off" \
+    | sudo tee /etc/sudoers.d/focus-block && sudo chmod 440 /etc/sudoers.d/focus-block
+  ```
+
+  Without the grant, Focus still silences notifications; the blocker calls
+  just fail quietly (`sudo -n`).
 - The WezTerm agent lifecycle hook (`wezterm-agent-status`) lives with the
   WezTerm configuration in the dotfiles repository; this bar only reads the
   runtime state files it writes under `$XDG_RUNTIME_DIR`.

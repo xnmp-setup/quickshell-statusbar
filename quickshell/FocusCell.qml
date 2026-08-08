@@ -18,8 +18,8 @@ Item {
     readonly property string tooltip: !available
         ? "Notification daemon unreachable · click to wake mako and enable Focus"
         : dnd
-            ? "Focus is on · notifications are silenced"
-            : "Focus is off · click to silence notifications"
+            ? "Focus is on · notifications silenced, listed sites blocked"
+            : "Focus is off · click to silence notifications and block distracting sites"
     readonly property color displayColor: dnd
         ? themeColors.accent
         : themeColors.text_dim
