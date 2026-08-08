@@ -60,7 +60,7 @@ def bounded_integer(value: object, minimum: int, maximum: int) -> int | None:
 # --- subprocess execution -----------------------------------------------------
 
 
-def _debug(message: str) -> None:
+def debug(message: str) -> None:
     # stdout is the data channel; diagnostics are opt-in via STATUSBAR_DEBUG
     # so failures stay silent by default (matching historical behaviour).
     if os.environ.get("STATUSBAR_DEBUG"):
@@ -76,7 +76,7 @@ def run_command(
             command, check=False, capture_output=True, text=True, timeout=timeout
         ).stdout
     except (OSError, subprocess.TimeoutExpired) as error:
-        _debug(f"{command[0] if command else '?'}: {error}")
+        debug(f"{command[0] if command else '?'}: {error}")
         return ""
 
 

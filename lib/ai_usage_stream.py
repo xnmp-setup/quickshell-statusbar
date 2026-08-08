@@ -10,7 +10,9 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import select
+import shutil
 import subprocess
 import sys
 import time
@@ -24,6 +26,7 @@ from stream_kit import (
     atomic_write_json,
     bounded_integer,
     bounded_percent,
+    debug,
     run_stream,
 )
 
@@ -51,6 +54,19 @@ CODEX_EXCHANGE_TIMEOUT = 12.0
 CODEX_SHUTDOWN_WAIT = 1.0
 # JSON-RPC id of the request whose reply ends the exchange.
 CODEX_RATE_LIMIT_REQUEST_ID = 1
+CODEX_EXECUTABLE = "codex"
+# The codex CLI installs through node/bun package managers, whose bin
+# directories reach PATH via an interactive shell profile. The bar's stream
+# inherits the login-session PATH instead, which usually lacks them, so it
+# looks in the known install locations itself.
+CODEX_SEARCH_GLOBS = (
+    ".local/bin/codex",
+    ".npm-global/bin/codex",
+    ".bun/bin/codex",
+    ".volta/bin/codex",
+    ".local/share/pnpm/codex",
+    ".nvm/versions/node/*/bin/codex",
+)
 
 CodexFetcher = Callable[[], "ProviderUsage | None"]
 
@@ -467,6 +483,47 @@ def read_lines_until(
     return lines
 
 
+def version_ordering_key(path: Path) -> tuple[int, ...]:
+    """Rank sibling installs by the version in their directory: v9 below v25."""
+    return tuple(int(number) for number in re.findall(r"\d+", path.parent.parent.name))
+
+
+def codex_candidates(home: Path) -> list[Path]:
+    """Known install locations for the codex CLI, newest version first."""
+    return [
+        match
+        for pattern in CODEX_SEARCH_GLOBS
+        for match in sorted(home.glob(pattern), key=version_ordering_key, reverse=True)
+    ]
+
+
+def resolve_codex_executable(
+    *,
+    environ: Mapping[str, str] = os.environ,
+    home: Path | None = None,
+    which: Callable[[str], str | None] | None = None,
+) -> str:
+    """CODEX_BIN, else PATH, else a known install directory, else the bare name.
+
+    Returning the bare name when nothing resolves is deliberate: it fails the
+    same way a missing binary already does, and the caller treats that as "no
+    reading this cycle" rather than an error.
+    """
+    override = environ.get("CODEX_BIN")
+    if override:
+        return override
+    lookup = which or (lambda name: shutil.which(name, path=environ.get("PATH")))
+    on_path = lookup(CODEX_EXECUTABLE)
+    if on_path:
+        return on_path
+    root = home if home is not None else Path(environ.get("HOME", "~")).expanduser()
+    for candidate in codex_candidates(root):
+        if os.access(candidate, os.X_OK):
+            return str(candidate)
+    debug("codex: not on PATH nor in any known install directory")
+    return CODEX_EXECUTABLE
+
+
 def run_codex_app_server(
     requests: Sequence[Mapping[str, object]],
     *,
@@ -475,8 +532,7 @@ def run_codex_app_server(
     is_complete: Callable[[str], bool] = completes_exchange,
 ) -> list[str]:
     """Write `requests` to a codex app-server and read lines until it answers."""
-    executable = os.environ.get("CODEX_BIN", "codex")
-    argv = list(command or (executable, "app-server"))
+    argv = list(command or (resolve_codex_executable(), "app-server"))
     try:
         process = subprocess.Popen(
             argv,
@@ -518,7 +574,10 @@ def run_codex_app_server(
 
 
 def fetch_codex_usage() -> ProviderUsage | None:
-    return parse_codex_messages(run_codex_app_server(codex_requests()))
+    fetched = parse_codex_messages(run_codex_app_server(codex_requests()))
+    if fetched is None:
+        debug("codex: no rate-limit reply this cycle")
+    return fetched
 
 
 class UsageCollector:

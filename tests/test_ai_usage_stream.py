@@ -417,6 +417,70 @@ REPLY = json.dumps(
 )
 
 
+class CodexExecutableTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.home = Path(self.directory.name)
+
+    def install(self, relative: str) -> Path:
+        path = self.home / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        return path
+
+    def resolve(self, **environ: str) -> str:
+        return usage.resolve_codex_executable(
+            environ=environ, home=self.home, which=lambda _: None
+        )
+
+    def test_an_explicit_override_wins_over_everything_else(self) -> None:
+        self.install(".local/bin/codex")
+        resolved = usage.resolve_codex_executable(
+            environ={"CODEX_BIN": "/opt/codex"},
+            home=self.home,
+            which=lambda _: "/usr/bin/codex",
+        )
+        self.assertEqual(resolved, "/opt/codex")
+
+    def test_a_binary_on_path_beats_the_install_directories(self) -> None:
+        self.install(".local/bin/codex")
+        resolved = usage.resolve_codex_executable(
+            environ={}, home=self.home, which=lambda _: "/usr/bin/codex"
+        )
+        self.assertEqual(resolved, "/usr/bin/codex")
+
+    def test_a_package_manager_install_is_found_when_path_misses_it(self) -> None:
+        # The bar inherits a login-session PATH without the node bin dirs.
+        installed = self.install(".nvm/versions/node/v25.6.0/bin/codex")
+        self.assertEqual(self.resolve(), str(installed))
+
+    def test_the_newest_node_version_wins(self) -> None:
+        self.install(".nvm/versions/node/v9.1.0/bin/codex")
+        newest = self.install(".nvm/versions/node/v25.6.0/bin/codex")
+        self.assertEqual(self.resolve(), str(newest))
+
+    def test_a_non_executable_file_is_not_a_candidate(self) -> None:
+        stub = self.home / ".local/bin/codex"
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        stub.write_text("not runnable\n")
+        stub.chmod(0o600)
+        real = self.install(".bun/bin/codex")
+        self.assertEqual(self.resolve(), str(real))
+
+    def test_nothing_installed_falls_back_to_the_bare_name(self) -> None:
+        # Same failure mode as before: the spawn fails and the cycle yields no
+        # reading, rather than the stream dying.
+        self.assertEqual(self.resolve(), "codex")
+
+    def test_a_missing_home_is_not_an_error(self) -> None:
+        resolved = usage.resolve_codex_executable(
+            environ={"HOME": str(self.home / "gone")}, which=lambda _: None
+        )
+        self.assertEqual(resolved, "codex")
+
+
 class CodexTransportTest(unittest.TestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
