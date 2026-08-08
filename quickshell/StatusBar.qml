@@ -35,7 +35,7 @@ PanelWindow {
         + (showGpuTemp ? 34 : 0)
     readonly property int usageCellWidth: 188
     readonly property int compactUsageCellWidth: 39
-    readonly property int focusCellWidth: 40
+    readonly property int focusCellWidth: settings.showFocus ? 40 : 0
     readonly property bool compactUsage: !StatusLayout.rightRegionClearsClock(
         width,
         clockCell.implicitWidth,
@@ -229,7 +229,9 @@ PanelWindow {
             hostItem: contentRoot
             pointerX: bar.settingsMenuX
             autoHide: bar.settings.autoHide
+            showFocus: bar.settings.showFocus
             onAutoHideRequested: value => bar.settings.setAutoHide(value)
+            onShowFocusRequested: value => bar.settings.setShowFocus(value)
             onDismissed: shown = false
         }
 
@@ -242,17 +244,6 @@ PanelWindow {
             }
             spacing: 0
             z: 1
-
-            FocusCell {
-                themeColors: bar.themeColors
-                available: bar.focusSource.available
-                dnd: bar.focusSource.dnd
-                onToggled: bar.focusSource.toggle()
-                onEditSitesRequested: Quickshell.execDetached(
-                    FocusState.editDomainsCommand(Quickshell.env("HOME")))
-                onViewHostsRequested: Quickshell.execDetached(
-                    FocusState.viewHostsCommand())
-            }
 
             RowLayout {
                 id: telemetry
@@ -343,7 +334,22 @@ PanelWindow {
                 usage: bar.statusSource.usage.codex
                 themeColors: bar.themeColors
                 compact: bar.compactUsage
-                last: true
+                last: !bar.settings.showFocus
+            }
+
+            Loader {
+                active: bar.settings.showFocus
+                sourceComponent: FocusCell {
+                    themeColors: bar.themeColors
+                    available: bar.focusSource.available
+                    dnd: bar.focusSource.dnd
+                    last: true
+                    onToggled: bar.focusSource.toggle()
+                    onEditSitesRequested: Quickshell.execDetached(
+                        FocusState.editDomainsCommand(Quickshell.env("HOME")))
+                    onViewHostsRequested: Quickshell.execDetached(
+                        FocusState.viewHostsCommand())
+                }
             }
         }
     }

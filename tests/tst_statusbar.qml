@@ -82,6 +82,7 @@ TestCase {
         SettingsMenu {
             themeColors: testCase.themeColors
             autoHide: false
+            showFocus: false
         }
     }
 
@@ -1017,6 +1018,15 @@ TestCase {
         menu.autoHide = true;
         menu.toggleAutoHide();
         compare(seen, [true, false]);
+
+        // The Focus row follows the same report-intent contract.
+        const focusSeen = [];
+        menu.showFocusRequested.connect(value => focusSeen.push(value));
+        menu.toggleShowFocus();
+        compare(focusSeen, [true]);
+        menu.showFocus = true;
+        menu.toggleShowFocus();
+        compare(focusSeen, [true, false]);
     }
 
     function test_numeric_column_does_not_move_with_digit_count(): void {

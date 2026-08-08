@@ -9,6 +9,7 @@ HoverPopup {
     id: menu
 
     required property bool autoHide
+    required property bool showFocus
 
     // True while the pointer is on the bar the menu hangs from. The menu stays
     // put whenever the pointer is on either of them, so the gap between the
@@ -23,6 +24,7 @@ HoverPopup {
     readonly property bool wanted: pointerInside || pointerNearby
 
     signal autoHideRequested(bool value)
+    signal showFocusRequested(bool value)
     signal dismissed
 
     readonly property int rowWidth: 268
@@ -36,6 +38,91 @@ HoverPopup {
 
     function toggleAutoHide(): void {
         autoHideRequested(!autoHide);
+    }
+
+    function toggleShowFocus(): void {
+        showFocusRequested(!showFocus);
+    }
+
+    component CheckRow: Item {
+        id: row
+
+        required property string label
+        required property string hint
+        required property bool checked
+
+        signal toggled()
+
+        width: menu.rowWidth
+        height: 40
+
+        MouseArea {
+            id: rowPointer
+
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: row.toggled()
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -4
+            radius: 4
+            color: rowPointer.containsMouse
+                ? Qt.lighter(menu.themeColors.surface, 1.15)
+                : "transparent"
+        }
+
+        Rectangle {
+            id: rowCheckBox
+
+            anchors.verticalCenter: parent.verticalCenter
+            width: 15
+            height: 15
+            radius: 3
+            color: row.checked ? menu.themeColors.accent : "transparent"
+            border.width: 1
+            border.color: row.checked
+                ? menu.themeColors.accent
+                : menu.themeColors.border
+
+            Text {
+                anchors.centerIn: parent
+                visible: row.checked
+                text: "✓"
+                color: menu.themeColors.background
+                font.family: "Inter"
+                font.pixelSize: 10
+                font.weight: Font.Bold
+            }
+        }
+
+        Column {
+            anchors {
+                left: rowCheckBox.right
+                leftMargin: 9
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: 1
+
+            Text {
+                text: row.label
+                color: menu.themeColors.text
+                font.family: "Inter"
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+            }
+
+            Text {
+                width: parent.width
+                text: row.hint
+                color: menu.themeColors.text_dim
+                wrapMode: Text.Wrap
+                font.family: "Inter"
+                font.pixelSize: 10
+            }
+        }
     }
 
     // Clicking is deliberate, so there is nothing to debounce. Sitting flush
@@ -84,79 +171,18 @@ HoverPopup {
             color: menu.themeColors.border
         }
 
-        Item {
-            id: autoHideRow
+        CheckRow {
+            label: "Auto-hide the bar"
+            hint: "Stays out of sight until the pointer reaches the top of the screen"
+            checked: menu.autoHide
+            onToggled: menu.toggleAutoHide()
+        }
 
-            width: menu.rowWidth
-            height: 40
-
-            MouseArea {
-                id: autoHidePointer
-
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: menu.toggleAutoHide()
-            }
-
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: -4
-                radius: 4
-                color: autoHidePointer.containsMouse
-                    ? Qt.lighter(menu.themeColors.surface, 1.15)
-                    : "transparent"
-            }
-
-            Rectangle {
-                id: checkBox
-
-                anchors.verticalCenter: parent.verticalCenter
-                width: 15
-                height: 15
-                radius: 3
-                color: menu.autoHide ? menu.themeColors.accent : "transparent"
-                border.width: 1
-                border.color: menu.autoHide
-                    ? menu.themeColors.accent
-                    : menu.themeColors.border
-
-                Text {
-                    anchors.centerIn: parent
-                    visible: menu.autoHide
-                    text: "✓"
-                    color: menu.themeColors.background
-                    font.family: "Inter"
-                    font.pixelSize: 10
-                    font.weight: Font.Bold
-                }
-            }
-
-            Column {
-                anchors {
-                    left: checkBox.right
-                    leftMargin: 9
-                    right: parent.right
-                    verticalCenter: parent.verticalCenter
-                }
-                spacing: 1
-
-                Text {
-                    text: "Auto-hide the bar"
-                    color: menu.themeColors.text
-                    font.family: "Inter"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                }
-
-                Text {
-                    width: parent.width
-                    text: "Stays out of sight until the pointer reaches the top of the screen"
-                    color: menu.themeColors.text_dim
-                    wrapMode: Text.Wrap
-                    font.family: "Inter"
-                    font.pixelSize: 10
-                }
-            }
+        CheckRow {
+            label: "Show the Focus toggle"
+            hint: "Do-not-disturb cell at the right end of the bar"
+            checked: menu.showFocus
+            onToggled: menu.toggleShowFocus()
         }
     }
 }

@@ -13,9 +13,15 @@ Scope {
         || Quickshell.env("HOME") + "/.config") + "/quickshell-statusbar"
     // Hide the bar until the pointer reaches the top edge of the screen.
     readonly property bool autoHide: store.autoHide === true
+    // Show the Focus (do-not-disturb) toggle at the right end of the bar.
+    readonly property bool showFocus: store.showFocus === true
 
     function setAutoHide(value: bool): void {
         store.autoHide = value;
+    }
+
+    function setShowFocus(value: bool): void {
+        store.showFocus = value;
     }
 
     FileView {
@@ -35,6 +41,7 @@ Scope {
             id: store
 
             property bool autoHide: false
+            property bool showFocus: true
         }
     }
 }
