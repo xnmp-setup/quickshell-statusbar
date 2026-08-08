@@ -39,9 +39,27 @@ without_section() {
     ' "$HOSTS_FILE"
 }
 
+# Replacing a symlinked hosts file (NixOS points it into /etc/static) would
+# only appear to work: the next system activation restores the symlink and
+# silently discards the block. Fail loudly instead.
+refuse_symlink() {
+    if [ -L "$HOSTS_FILE" ]; then
+        echo "focus-block: $HOSTS_FILE is a symlink (generated hosts file?); refusing to replace it" >&2
+        exit 1
+    fi
+}
+
 write_hosts() {
     tmp=$(mktemp "$HOSTS_FILE.XXXXXX")
     cat > "$tmp"
+    # /bin/sh has no pipefail, so a producer dying mid-pipe would otherwise
+    # install whatever prefix made it through. The loopback line doubles as a
+    # completeness sentinel: no hosts file this writes is valid without it.
+    if ! grep -qE '^127\.0\.0\.1[[:space:]]+localhost' "$tmp"; then
+        rm -f "$tmp"
+        echo "focus-block: refusing to install a hosts file without '127.0.0.1 localhost'" >&2
+        exit 1
+    fi
     chmod 644 "$tmp"
     mv "$tmp" "$HOSTS_FILE"
 }
@@ -68,10 +86,12 @@ flush_dns_cache() {
 
 case "${1:-}" in
 on)
+    refuse_symlink
     { without_section; block_section; } | write_hosts
     flush_dns_cache
     ;;
 off)
+    refuse_symlink
     without_section | write_hosts
     flush_dns_cache
     ;;

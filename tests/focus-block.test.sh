@@ -61,6 +61,26 @@ expect_line "off" "::1 localhost"
 reject_line "off" "focus-block"
 reject_line "off" "youtube"
 
+# A hosts file missing the loopback sentinel must be left untouched: with no
+# pipefail in sh, the sentinel is what catches a producer dying mid-pipe.
+printf '# intentionally no localhost line\n1.2.3.4 example.test\n' > "$FOCUS_BLOCK_HOSTS"
+if "$block" on 2>/dev/null; then
+    fail "on must refuse a hosts file without 127.0.0.1 localhost"
+fi
+expect_line "sentinel" "1.2.3.4 example.test"
+reject_line "sentinel" "youtube"
+
+# A symlinked hosts file (NixOS-style generated file) must be refused, not
+# silently replaced by a regular file.
+printf '127.0.0.1 localhost\n' > "$scratch/hosts.real"
+ln -sf "$scratch/hosts.real" "$FOCUS_BLOCK_HOSTS"
+if "$block" on 2>/dev/null; then
+    fail "on must refuse a symlinked hosts file"
+fi
+test -L "$FOCUS_BLOCK_HOSTS" || fail "refused symlink must stay a symlink"
+rm "$FOCUS_BLOCK_HOSTS"
+
+printf '127.0.0.1 localhost\n' > "$FOCUS_BLOCK_HOSTS"
 rm "$FOCUS_BLOCK_DOMAINS"
 "$block" on
 test "$("$block" status)" = on || fail "missing domains file still writes markers"
