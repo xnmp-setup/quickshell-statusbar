@@ -93,6 +93,8 @@ TestCase {
             themeColors: testCase.themeColors
             autoHide: false
             showFocus: false
+            showIo: false
+            showGpu: false
             transparency: 0
         }
     }
@@ -1092,6 +1094,22 @@ TestCase {
         menu.toggleShowFocus();
         compare(focusSeen, [true, false]);
 
+        const ioSeen = [];
+        menu.showIoRequested.connect(value => ioSeen.push(value));
+        menu.toggleShowIo();
+        compare(ioSeen, [true]);
+        menu.showIo = true;
+        menu.toggleShowIo();
+        compare(ioSeen, [true, false]);
+
+        const gpuSeen = [];
+        menu.showGpuRequested.connect(value => gpuSeen.push(value));
+        menu.toggleShowGpu();
+        compare(gpuSeen, [true]);
+        menu.showGpu = true;
+        menu.toggleShowGpu();
+        compare(gpuSeen, [true, false]);
+
         // Transparency is clamped and follows the same report-intent contract.
         const transparencySeen = [];
         menu.transparencyRequested.connect(value => transparencySeen.push(value));
@@ -1393,6 +1411,7 @@ TestCase {
         compare(cell.percentText, "8%");
         compare(cell.compactResetText, "5d 3h");
         compare(cell.dividerVisible, false);
+        compare(cell.providerIconRounded, true);
     }
 
     function test_usage_color_reflects_consumed_quota_thresholds(): void {
@@ -1437,8 +1456,8 @@ TestCase {
         const clockWidth = 180;
         // CPU and GPU include hot-temperature extensions. IO and Wi-Fi are
         // glyph-only; battery is compact; both usage cells are stacked.
-        const denseRegionWidth = 102 + 68 + 32 + 102 + 32 + 58
-            + 2 * 88 + 32;
+        const denseRegionWidth = 102 + 68 + 32 + 102 + 32 + 56
+            + 8 + 2 * 88 + 32;
         verify(StatusLayout.rightRegionClearsClock(
             width,
             clockWidth,

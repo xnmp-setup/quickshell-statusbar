@@ -10,6 +10,8 @@ HoverPopup {
 
     required property bool autoHide
     required property bool showFocus
+    required property bool showIo
+    required property bool showGpu
     required property real transparency
 
     // True while the pointer is on the bar the menu hangs from. The menu stays
@@ -26,6 +28,8 @@ HoverPopup {
 
     signal autoHideRequested(bool value)
     signal showFocusRequested(bool value)
+    signal showIoRequested(bool value)
+    signal showGpuRequested(bool value)
     signal transparencyRequested(real value)
     signal dismissed
 
@@ -46,6 +50,14 @@ HoverPopup {
 
     function toggleShowFocus(): void {
         showFocusRequested(!showFocus);
+    }
+
+    function toggleShowIo(): void {
+        showIoRequested(!showIo);
+    }
+
+    function toggleShowGpu(): void {
+        showGpuRequested(!showGpu);
     }
 
     function requestTransparency(value: real): void {
@@ -278,6 +290,20 @@ HoverPopup {
             hint: "Do-not-disturb cell at the right end of the bar"
             checked: menu.showFocus
             onToggled: menu.toggleShowFocus()
+        }
+
+        CheckRow {
+            label: "Show disk I/O"
+            hint: "Activity glyph with recent stall history on hover"
+            checked: menu.showIo
+            onToggled: menu.toggleShowIo()
+        }
+
+        CheckRow {
+            label: "Show GPU usage"
+            hint: "Graphics load and hot temperature warning"
+            checked: menu.showGpu
+            onToggled: menu.toggleShowGpu()
         }
 
         SliderRow {

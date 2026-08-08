@@ -27,7 +27,7 @@ Item {
         : themeColors.text_dim
 
     implicitWidth: 40
-    implicitHeight: 40
+    implicitHeight: 38
 
     Rectangle {
         visible: !root.last

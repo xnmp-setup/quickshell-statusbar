@@ -15,6 +15,9 @@ Scope {
     readonly property bool autoHide: store.autoHide === true
     // Show the Focus (do-not-disturb) toggle at the right end of the bar.
     readonly property bool showFocus: store.showFocus === true
+    // Secondary telemetry stays available without occupying the default tray.
+    readonly property bool showIo: store.showIo === true
+    readonly property bool showGpu: store.showGpu === true
     // Fraction of the background removed; text and controls remain opaque.
     readonly property real transparency: Math.max(
         0, Math.min(1, Number(store.transparency))
@@ -26,6 +29,14 @@ Scope {
 
     function setShowFocus(value: bool): void {
         store.showFocus = value;
+    }
+
+    function setShowIo(value: bool): void {
+        store.showIo = value;
+    }
+
+    function setShowGpu(value: bool): void {
+        store.showGpu = value;
     }
 
     function setTransparency(value: real): void {
@@ -50,6 +61,8 @@ Scope {
 
             property bool autoHide: false
             property bool showFocus: true
+            property bool showIo: false
+            property bool showGpu: false
             property real transparency: 0
         }
     }

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import "StatusGraph.js" as StatusGraph
 import "StatusFormat.js" as StatusFormat
 import "StatusSeverity.js" as StatusSeverity
@@ -86,6 +87,46 @@ Item {
     readonly property color displayColor: percentageColor()
     readonly property real percentColumnX: percentLabel.mapToItem(root, 0, 0).x
     readonly property real resetColumnX: resetLabel.mapToItem(root, 0, 0).x
+    readonly property bool providerIconRounded: provider === "claude"
+
+    component ProviderIcon: Item {
+        id: providerIcon
+
+        required property int iconSize
+
+        width: iconSize
+        height: iconSize
+
+        Image {
+            id: iconSource
+
+            anchors.fill: parent
+            visible: !root.providerIconRounded
+            source: root.provider === "claude"
+                ? "assets/claude.png"
+                : "assets/openai.svg"
+            fillMode: Image.PreserveAspectFit
+            mipmap: true
+            layer.enabled: root.providerIconRounded
+        }
+
+        Rectangle {
+            id: roundedMask
+
+            anchors.fill: parent
+            visible: false
+            radius: 3
+            layer.enabled: true
+        }
+
+        MultiEffect {
+            anchors.fill: parent
+            visible: root.providerIconRounded
+            source: iconSource
+            maskEnabled: true
+            maskSource: roundedMask
+        }
+    }
 
     function windowLabel(minutes: var): string {
         return StatusFormat.windowLabel(minutes);
@@ -118,7 +159,7 @@ Item {
     }
 
     implicitWidth: stacked ? 96 : (compact ? 39 : 188)
-    implicitHeight: 40
+    implicitHeight: 38
 
     Timer {
         interval: 30000
@@ -143,15 +184,9 @@ Item {
         anchors.centerIn: parent
         spacing: root.compact ? 2 : 4
 
-        Image {
+        ProviderIcon {
             anchors.verticalCenter: parent.verticalCenter
-            width: root.compact ? 8 : 14
-            height: width
-            source: root.provider === "claude"
-                ? "assets/claude.png"
-                : "assets/openai.svg"
-            fillMode: Image.PreserveAspectFit
-            mipmap: true
+            iconSize: root.compact ? 8 : 14
         }
 
         Text {
@@ -202,15 +237,9 @@ Item {
         anchors.centerIn: parent
         spacing: 5
 
-        Image {
+        ProviderIcon {
             anchors.verticalCenter: parent.verticalCenter
-            width: 17
-            height: width
-            source: root.provider === "claude"
-                ? "assets/claude.png"
-                : "assets/openai.svg"
-            fillMode: Image.PreserveAspectFit
-            mipmap: true
+            iconSize: 17
         }
 
         Column {

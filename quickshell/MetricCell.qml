@@ -31,6 +31,7 @@ Item {
     property bool valueVisible: true
     property bool dividerVisible: !last
     property int customIconWidth: 17
+    property int contentSpacing: compact || dense ? 3 : 4
     readonly property bool showTemperature: temperature !== null
         && temperature !== undefined
     // Hack Nerd Font is assumed by the WezTerm config on every platform, but a
@@ -58,7 +59,7 @@ Item {
     implicitWidth: compact
         ? (valueVisible ? 68 : 40)
         : (dense ? 68 : 96) + (showTemperature ? 34 : 0)
-    implicitHeight: 40
+    implicitHeight: 38
 
     Rectangle {
         visible: root.dividerVisible
@@ -73,7 +74,7 @@ Item {
 
     Row {
         anchors.centerIn: parent
-        spacing: root.compact || root.dense ? 3 : 4
+        spacing: root.contentSpacing
 
         Loader {
             visible: active

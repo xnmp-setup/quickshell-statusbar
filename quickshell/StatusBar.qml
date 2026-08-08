@@ -75,8 +75,8 @@ PanelWindow {
     Component.onCompleted: renameRequestsReady = true
 
     visible: barVisible
-    implicitHeight: 40
-    exclusiveZone: barVisible && !settings.autoHide ? 40 : 0
+    implicitHeight: 38
+    exclusiveZone: barVisible && !settings.autoHide ? 38 : 0
     // The bar paints its own background so the whole thing can fade out
     // together; the surface itself stays transparent.
     color: "transparent"
@@ -215,9 +215,13 @@ PanelWindow {
             pointerX: bar.settingsMenuX
             autoHide: bar.settings.autoHide
             showFocus: bar.settings.showFocus
+            showIo: bar.settings.showIo
+            showGpu: bar.settings.showGpu
             transparency: bar.settings.transparency
             onAutoHideRequested: value => bar.settings.setAutoHide(value)
             onShowFocusRequested: value => bar.settings.setShowFocus(value)
+            onShowIoRequested: value => bar.settings.setShowIo(value)
+            onShowGpuRequested: value => bar.settings.setShowGpu(value)
             onTransparencyRequested: value => bar.settings.setTransparency(value)
             onDismissed: shown = false
         }
@@ -258,31 +262,40 @@ PanelWindow {
                     history: bar.statusSource.history.ram
                     dividerVisible: false
                 }
-                MetricCell {
-                    label: "IO"
-                    iconText: StatusIcons.ioActivityIcon()
-                    value: bar.statusSource.metrics.io
-                    tooltip: bar.statusSource.metrics.ioTooltip || "Time tasks were stalled on disk I/O"
-                    themeColors: bar.themeColors
-                    history: bar.statusSource.history.io
-                    smoothHistory: true
-                    compact: true
-                    valueVisible: false
-                    dividerVisible: false
-                    Layout.preferredWidth: 32
+                Loader {
+                    active: bar.settings.showIo
+                    visible: active
+                    Layout.preferredWidth: active ? 32 : 0
+                    sourceComponent: MetricCell {
+                        label: "IO"
+                        iconText: StatusIcons.ioActivityIcon()
+                        value: bar.statusSource.metrics.io
+                        tooltip: bar.statusSource.metrics.ioTooltip || "Time tasks were stalled on disk I/O"
+                        themeColors: bar.themeColors
+                        history: bar.statusSource.history.io
+                        smoothHistory: true
+                        compact: true
+                        valueVisible: false
+                        dividerVisible: false
+                    }
                 }
-                MetricCell {
-                    label: "GPU"
-                    dense: true
-                    value: bar.statusSource.metrics.gpu
-                    temperature: bar.statusSource.metrics.gpuTemp
-                    tooltip: bar.showGpuTemp
-                        ? "Graphics processor use · temperature shown while 75°C or hotter"
-                        : "Graphics processor use"
-                    themeColors: bar.themeColors
-                    history: bar.statusSource.history.gpu
-                    smoothHistory: true
-                    dividerVisible: false
+                Loader {
+                    active: bar.settings.showGpu
+                    visible: active
+                    Layout.preferredWidth: active ? 68 + (bar.showGpuTemp ? 34 : 0) : 0
+                    sourceComponent: MetricCell {
+                        label: "GPU"
+                        dense: true
+                        value: bar.statusSource.metrics.gpu
+                        temperature: bar.statusSource.metrics.gpuTemp
+                        tooltip: bar.showGpuTemp
+                            ? "Graphics processor use · temperature shown while 75°C or hotter"
+                            : "Graphics processor use"
+                        themeColors: bar.themeColors
+                        history: bar.statusSource.history.gpu
+                        smoothHistory: true
+                        dividerVisible: false
+                    }
                 }
 
                 Loader {
@@ -314,7 +327,7 @@ PanelWindow {
                 }
                 Loader {
                     active: bar.showLaptop
-                    Layout.preferredWidth: active ? 58 : 0
+                    Layout.preferredWidth: active ? 56 : 0
                     sourceComponent: MetricCell {
                         label: "BAT"
                         iconText: StatusIcons.batteryIcon(
@@ -327,9 +340,14 @@ PanelWindow {
                         themeColors: bar.themeColors
                         history: bar.statusSource.history.battery
                         compact: true
+                        contentSpacing: 0
                         dividerVisible: false
                     }
                 }
+            }
+
+            Item {
+                Layout.preferredWidth: 8
             }
 
             UsageCell {
