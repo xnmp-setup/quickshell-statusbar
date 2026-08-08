@@ -1,5 +1,10 @@
 #!/bin/sh
 set -eu
 
-exec "${HOME}/.local/bin/uv" run --script \
+# uv's location varies by platform (NixOS ships it system-wide, the
+# standalone installer uses ~/.local/bin), so prefer PATH with a fallback.
+uv="$(command -v uv || true)"
+: "${uv:="${HOME}/.local/bin/uv"}"
+
+exec "$uv" run --script \
   "${HOME}/.local/lib/hypr_status_stream.py" "$@"
