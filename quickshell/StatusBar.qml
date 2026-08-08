@@ -339,6 +339,10 @@ PanelWindow {
 
             Loader {
                 active: bar.settings.showFocus
+                // Layouts only skip invisible children; an inactive Loader's
+                // implicit width going to zero does not reliably trigger a
+                // relayout, leaving a 40px phantom slot at the bar's edge.
+                visible: active
                 sourceComponent: FocusCell {
                     themeColors: bar.themeColors
                     available: bar.focusSource.available
