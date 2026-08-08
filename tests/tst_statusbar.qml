@@ -457,6 +457,33 @@ TestCase {
                 ["makoctl", "mode", "-t", "do-not-disturb"]);
     }
 
+    Component {
+        id: focusMenuComponent
+
+        FocusContextMenu {
+            themeColors: testCase.themeColors
+        }
+    }
+
+    function test_focus_menu_offers_blocklist_edit_and_hosts_view(): void {
+        const menu = createTemporaryObject(focusMenuComponent, this);
+        compare(menu.count, 2);
+        let edits = 0;
+        let views = 0;
+        menu.editSitesRequested.connect(() => edits += 1);
+        menu.viewHostsRequested.connect(() => views += 1);
+        menu.itemAt(0).triggered();
+        menu.itemAt(1).triggered();
+        compare(edits, 1);
+        compare(views, 1);
+    }
+
+    function test_focus_menu_open_commands_target_the_real_files(): void {
+        compare(FocusState.editDomainsCommand("/home/chong"),
+                ["xdg-open", "/home/chong/.config/focus-block/domains"]);
+        compare(FocusState.viewHostsCommand(), ["xdg-open", "/etc/hosts"]);
+    }
+
     function test_focus_blocker_command_matches_the_sudoers_grant(): void {
         // The argv must stay exactly what /etc/sudoers.d/focus-block allows,
         // with -n so a missing grant fails instead of hanging on a prompt.
@@ -659,6 +686,45 @@ TestCase {
         // Gaps in the source stay gaps in the rate.
         compare(StatusGraph.ratePerHour([null, 2, 8], 1800, 1800), [null, null, 12]);
         compare(StatusGraph.ratePerHour([], 600, 3600), []);
+    }
+
+    function test_usage_burn_rate_recovers_immediately_after_a_reset(): void {
+        // The baseline is the post-reset minimum, not the sample one lookback
+        // ago, so climbing usage reads as a real rate instead of an hour of
+        // false zero while the comparison straddles the reset cliff.
+        compare(StatusGraph.ratePerHour([50, 0, 1, 2], 1800, 1800),
+            [null, 0, 2, 2]);
+        compare(StatusGraph.ratePerHour([10, 50, 0, 2, 4], 1800, 3600),
+            [null, null, 0, 4, 4]);
+    }
+
+    function test_usage_reset_markers_land_on_grid_buckets(): void {
+        // endTime 2000, span 1000, 5 buckets => grid 1000..2000, step 250.
+        // Next reset 2100 is off screen; the walk back lands 1600 on bucket 2
+        // and drops 1100, which would pin to the left edge.
+        compare(StatusGraph.resetIndices(2100, 500, 2000, 1000, 5), [2]);
+        // Several boundaries in span come out oldest-first.
+        compare(StatusGraph.resetIndices(2000, 400, 2000, 1000, 5), [1, 2, 4]);
+        for (const bad of [[null, 500], [2100, 0], [2100, -5], ["x", 500]])
+            compare(StatusGraph.resetIndices(bad[0], bad[1], 2000, 1000, 5), []);
+        compare(StatusGraph.resetIndices(2100, 500, 2000, 1000, 1), []);
+    }
+
+    function test_tooltip_series_reset_markers_are_bounds_checked(): void {
+        const tip = createTemporaryObject(themedTooltipComponent, this, {
+            series: [{
+                label: "5H",
+                values: [1, 2, 3, 4, 5],
+                resets: [2, -1, 99, "x", null, 4]
+            }]
+        });
+        compare(tip.normalizedSeries.length, 1);
+        compare(tip.normalizedSeries[0].resets, [2, 4]);
+        // Entries without resets normalize to an empty list, not undefined.
+        const bare = createTemporaryObject(themedTooltipComponent, this, {
+            series: [{ label: "5H", values: [1, 2, 3] }]
+        });
+        compare(bare.normalizedSeries[0].resets, []);
     }
 
     function test_tooltip_series_replace_the_single_history_graph(): void {

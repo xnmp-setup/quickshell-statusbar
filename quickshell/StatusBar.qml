@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Hyprland
 import "StatusLayout.js" as StatusLayout
 import "StatusIcons.js" as StatusIcons
+import "FocusState.js" as FocusState
 import "StatusSeverity.js" as StatusSeverity
 
 PanelWindow {
@@ -247,6 +248,10 @@ PanelWindow {
                 available: bar.focusSource.available
                 dnd: bar.focusSource.dnd
                 onToggled: bar.focusSource.toggle()
+                onEditSitesRequested: Quickshell.execDetached(
+                    FocusState.editDomainsCommand(Quickshell.env("HOME")))
+                onViewHostsRequested: Quickshell.execDetached(
+                    FocusState.viewHostsCommand())
             }
 
             RowLayout {

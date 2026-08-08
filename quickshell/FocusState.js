@@ -75,6 +75,21 @@ function parseToggleReply(reply) {
     return fromModes(modes);
 }
 
+// The right-click menu opens these through the desktop handler; the blocklist
+// lives outside the repo so edits survive redeploys (same reasoning as
+// BarSettings' settings.json).
+function domainsPath(homeDir) {
+    return homeDir + "/.config/focus-block/domains";
+}
+
+function editDomainsCommand(homeDir) {
+    return ["xdg-open", domainsPath(homeDir)];
+}
+
+function viewHostsCommand() {
+    return ["xdg-open", "/etc/hosts"];
+}
+
 function nextState(previous, parsed) {
     return {
         available: parsed.available,

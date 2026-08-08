@@ -26,21 +26,64 @@ function resample(samples, field, endTime, spanSeconds, buckets) {
     return result;
 }
 
-// Consumption rate in percent per hour, measured across a trailing window
-// wide enough that the integer percent readings resolve into something other
-// than a spike train. Quota resets show up as negative deltas and clamp to
-// zero. Buckets without a full lookback are null so the line starts where the
-// measurement becomes real.
+// Consumption rate in percent per hour, measured against the earliest
+// occurrence of the trailing window's minimum rather than simply the sample
+// one lookback ago: diffing across a quota reset would otherwise clamp the
+// whole next lookback to zero while usage is visibly climbing again. On
+// monotone data the minimum sits at the window start, so nothing changes;
+// right after a reset the rate measures the climb since the reset. The
+// window stays wide enough that integer percent readings resolve into
+// something other than a spike train. Buckets whose window holds no earlier
+// finite sample are null so the line starts where the measurement is real.
 function ratePerHour(values, bucketSeconds, lookbackSeconds) {
     const span = Math.max(1, Math.round(lookbackSeconds / bucketSeconds));
-    const hours = span * bucketSeconds / 3600;
     const result = [];
     for (let index = 0; index < values.length; index += 1) {
         const current = values[index];
-        const previous = index >= span ? values[index - span] : null;
-        const measurable = typeof current === "number" && Number.isFinite(current)
-            && typeof previous === "number" && Number.isFinite(previous);
-        result.push(measurable ? Math.max(0, current - previous) / hours : null);
+        if (index < span
+                || typeof current !== "number" || !Number.isFinite(current)) {
+            result.push(null);
+            continue;
+        }
+        let baseline = -1;
+        for (let cursor = index - span; cursor < index; cursor += 1) {
+            const value = values[cursor];
+            if (typeof value === "number" && Number.isFinite(value)
+                    && (baseline === -1 || value < values[baseline]))
+                baseline = cursor;
+        }
+        if (baseline === -1) {
+            result.push(null);
+        } else if (current <= values[baseline]) {
+            result.push(0);
+        } else {
+            const hours = (index - baseline) * bucketSeconds / 3600;
+            result.push((current - values[baseline]) / hours);
+        }
+    }
+    return result;
+}
+
+// Bucket indices where a quota window rolled over, walking back one window
+// length at a time from the (future) next reset. Fixed-cadence steps are only
+// guaranteed for the window in progress — idle gaps can delay earlier
+// windows — but at the spans plotted here the current window's boundary is
+// the only one on screen in practice. Index 0 is excluded: a marker pinned
+// to the left edge reads as a plot border, not an event.
+function resetIndices(resetsAt, windowSeconds, endTime, spanSeconds, buckets) {
+    const result = [];
+    if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt)
+            || typeof windowSeconds !== "number" || !(windowSeconds > 0)
+            || buckets < 2)
+        return result;
+    const start = endTime - spanSeconds;
+    const step = spanSeconds / (buckets - 1);
+    for (let at = resetsAt; at > start; at -= windowSeconds) {
+        if (at > endTime)
+            continue;
+        const index = Math.round((at - start) / step);
+        if (index >= 1 && index < buckets)
+            result.unshift(index);
     }
     return result;
 }

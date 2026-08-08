@@ -10,6 +10,8 @@ Item {
     property bool last: false
 
     signal toggled()
+    signal editSitesRequested()
+    signal viewHostsRequested()
 
     // Hack Nerd Font is assumed by the WezTerm config on every platform, but a
     // machine without it degrades to the plain text label rather than tofu.
@@ -55,8 +57,22 @@ Item {
     // the live compositor, so hover belongs to a HoverHandler alone.
     MouseArea {
         anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         cursorShape: Qt.PointingHandCursor
-        onClicked: root.toggled()
+        onClicked: mouse => {
+            if (mouse.button === Qt.RightButton)
+                contextMenu.popup(root, 0, root.height + 4);
+            else
+                root.toggled();
+        }
+    }
+
+    FocusContextMenu {
+        id: contextMenu
+
+        themeColors: root.themeColors
+        onEditSitesRequested: root.editSitesRequested()
+        onViewHostsRequested: root.viewHostsRequested()
     }
 
     // Overridable seam so tests can drive the popup-open path (synthetic

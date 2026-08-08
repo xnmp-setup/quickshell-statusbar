@@ -31,19 +31,34 @@ Item {
     readonly property var secondarySeries: StatusGraph.resample(
         history, "secondaryPercent", nowEpoch, secondarySpanSeconds, graphBuckets
     )
+    // Bucket indices where each window reset inside its plotted span; drawn
+    // as faint vertical rules so a percent falling off a cliff (and the burn
+    // rate restarting) reads as the scheduled event it is.
+    readonly property var primaryResets: StatusGraph.resetIndices(
+        usage ? usage.resetsAt : null,
+        (usage && usage.windowMinutes ? usage.windowMinutes : 0) * 60,
+        nowEpoch, primarySpanSeconds, graphBuckets
+    )
+    readonly property var secondaryResets: StatusGraph.resetIndices(
+        usage ? usage.secondaryResetsAt : null,
+        (usage && usage.secondaryWindowMinutes ? usage.secondaryWindowMinutes : 0) * 60,
+        nowEpoch, secondarySpanSeconds, graphBuckets
+    )
     readonly property var graphSeries: {
         const series = [{
             label: windowTitle(usage ? usage.windowMinutes : null) + " · % USED",
             values: primarySeries,
             smoothed: false,
-            span: spanLabel(primarySpanSeconds)
+            span: spanLabel(primarySpanSeconds),
+            resets: primaryResets
         }];
         if (StatusGraph.finiteCount(secondarySeries) >= 2) {
             series.push({
                 label: windowTitle(usage.secondaryWindowMinutes) + " · % USED",
                 values: secondarySeries,
                 smoothed: false,
-                span: spanLabel(secondarySpanSeconds)
+                span: spanLabel(secondarySpanSeconds),
+                resets: secondaryResets
             });
         }
         series.push({
@@ -53,7 +68,8 @@ Item {
                 primarySeries, primaryBucketSeconds, rateLookbackSeconds
             ),
             smoothed: false,
-            span: spanLabel(primarySpanSeconds)
+            span: spanLabel(primarySpanSeconds),
+            resets: primaryResets
         });
         return series;
     }

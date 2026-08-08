@@ -16,24 +16,35 @@ HoverPopup {
     property var series: []
     readonly property var normalizedSeries: {
         const result = [];
-        const append = (label, values, wantSmoothed, span) => {
+        const append = (label, values, wantSmoothed, span, resets) => {
             const points = StatusGraph.alignedValues(values);
+            const marks = [];
+            if (resets && typeof resets.length === "number") {
+                for (let index = 0; index < resets.length; index += 1) {
+                    const mark = resets[index];
+                    if (typeof mark === "number" && Number.isFinite(mark)
+                            && mark >= 0 && mark < points.length)
+                        marks.push(mark);
+                }
+            }
             if (StatusGraph.finiteCount(points) >= 2)
                 result.push({
                     label: label,
                     values: points,
                     smoothed: wantSmoothed,
-                    span: span || ""
+                    span: span || "",
+                    resets: marks
                 });
         };
         if (series && typeof series.length === "number" && series.length > 0) {
             for (let index = 0; index < series.length; index += 1) {
                 const entry = series[index];
                 if (entry !== null && typeof entry === "object")
-                    append(entry.label || "", entry.values, entry.smoothed === true, entry.span);
+                    append(entry.label || "", entry.values, entry.smoothed === true,
+                           entry.span, entry.resets);
             }
         } else {
-            append("", history, smoothed, "");
+            append("", history, smoothed, "", []);
         }
         return result;
     }
@@ -126,6 +137,17 @@ HoverPopup {
                         };
 
                         const dim = control.themeColors.text_dim;
+                        // Reset markers go down first so the data line stays
+                        // on top of them.
+                        context.strokeStyle = Qt.alpha(dim, 0.35);
+                        context.lineWidth = 1;
+                        for (let mark = 0; mark < modelData.resets.length; mark += 1) {
+                            const markX = xFor(modelData.resets[mark]);
+                            context.beginPath();
+                            context.moveTo(markX, top);
+                            context.lineTo(markX, bottom);
+                            context.stroke();
+                        }
                         drawSeries(
                             values,
                             modelData.smoothed
