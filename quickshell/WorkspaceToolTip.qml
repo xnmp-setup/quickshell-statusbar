@@ -8,10 +8,17 @@ HoverPopup {
     required property var workspaceData
     readonly property int contentWidth: 388 - 2 * padding
     readonly property int visibleClientCount: Math.min(workspaceData.clients.length, 8)
+    readonly property int agentCount: workspaceData.claude + workspaceData.codex
     readonly property string windowSummary: workspaceData.clients.length
         + (workspaceData.clients.length === 1 ? " window" : " windows")
-        + " · " + (workspaceData.claude + workspaceData.codex)
-        + (workspaceData.claude + workspaceData.codex === 1 ? " agent" : " agents")
+    readonly property string agentSummary: agentCount
+        + (agentCount === 1 ? " agent" : " agents")
+    readonly property bool agentsAwaitInput: StatusFormat.sessionsAwaitInput(
+        workspaceData.clients, ""
+    )
+    readonly property color agentSummaryColor: StatusFormat.attentionColor(
+        agentsAwaitInput, themeColors.text_dim
+    )
 
     function stateLabel(state: string): string {
         return StatusFormat.stateLabel(state);
@@ -50,12 +57,26 @@ HoverPopup {
                 font.weight: Font.DemiBold
             }
 
-            Text {
-                text: control.windowSummary
-                color: control.themeColors.text_dim
-                font.family: "Inter"
-                font.pixelSize: 11
-                font.weight: Font.Medium
+            // Two texts rather than one so the agent count can alert without
+            // dragging the window count red with it.
+            Row {
+                spacing: 0
+
+                Text {
+                    text: control.windowSummary + " · "
+                    color: control.themeColors.text_dim
+                    font.family: "Inter"
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                }
+
+                Text {
+                    text: control.agentSummary
+                    color: control.agentSummaryColor
+                    font.family: "Inter"
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                }
             }
         }
 

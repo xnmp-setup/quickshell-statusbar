@@ -1,4 +1,5 @@
 import QtQuick
+import "StatusFormat.js" as StatusFormat
 
 Item {
     id: root
@@ -6,6 +7,12 @@ Item {
     required property string kind
     required property int count
     required property var themeColors
+    // True while any session behind this count is stopped waiting on a human.
+    property bool awaitingInput: false
+
+    readonly property color countColor: StatusFormat.sessionCountColor(
+        kind, awaitingInput, themeColors
+    )
 
     implicitWidth: sessionRow.implicitWidth
     implicitHeight: 22
@@ -38,7 +45,7 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.count
-            color: root.kind === "claude" ? root.themeColors.accent_light : root.themeColors.text
+            color: root.countColor
             font.family: "JetBrains Mono"
             font.pixelSize: 12
             font.weight: Font.DemiBold

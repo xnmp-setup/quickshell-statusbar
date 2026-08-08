@@ -99,6 +99,39 @@ function stateColor(state, themeColors) {
     return themeColors.text_dim;
 }
 
+// An agent session awaits input when it has stopped and cannot continue until
+// a human answers it. Only the two agent kinds have run states; a plain
+// process activity never does.
+function awaitsInput(activity) {
+    return !!activity && activity.state === "attention"
+        && (activity.kind === "claude" || activity.kind === "codex");
+}
+
+// Whether any session of `kind` across these clients is waiting on a human.
+// `kind` of "" asks about both agents at once.
+function sessionsAwaitInput(clients, kind) {
+    const matches = activity => awaitsInput(activity)
+        && (kind === "" || activity.kind === kind);
+    return (clients || []).some(
+        client => (client.activities || []).some(matches)
+    );
+}
+
+// A count alerts the moment one of the sessions behind it is waiting on a
+// human, and otherwise keeps its resting colour. The count is the only part of
+// a chip a glance catches, so it carries the signal rather than the icon.
+function attentionColor(awaitingInput, restingColor) {
+    return awaitingInput ? StatusSeverity.alertColor : restingColor;
+}
+
+// Session counts rest in their own agent's colour.
+function sessionCountColor(kind, awaitingInput, themeColors) {
+    return attentionColor(
+        awaitingInput,
+        kind === "claude" ? themeColors.accent_light : themeColors.text
+    );
+}
+
 // Activity rows are prefixed with the agent product name, except when the
 // title already is the product name, or the activity is a plain process.
 function activityLabel(activity) {

@@ -2,6 +2,7 @@
 // injected property so behavioral tests can drive a real chip offscreen.
 import QtQuick
 import "StatusCommands.js" as StatusCommands
+import "StatusFormat.js" as StatusFormat
 
 Rectangle {
     id: chip
@@ -24,6 +25,12 @@ Rectangle {
         : undefined
     readonly property bool active: liveWorkspace ? liveWorkspace.active : workspaceData.active === true
     readonly property string displayName: workspaceData.name
+    readonly property bool claudeAwaitsInput: StatusFormat.sessionsAwaitInput(
+        workspaceData.clients, "claude"
+    )
+    readonly property bool codexAwaitsInput: StatusFormat.sessionsAwaitInput(
+        workspaceData.clients, "codex"
+    )
     readonly property color accent: themeColors.accent
     readonly property color textPrimary: themeColors.text
     readonly property color textSecondary: themeColors.text_dim
@@ -233,6 +240,7 @@ Rectangle {
             visible: chip.workspaceData.claude > 0
             kind: "claude"
             count: chip.workspaceData.claude
+            awaitingInput: chip.claudeAwaitsInput
             themeColors: chip.themeColors
         }
 
@@ -240,6 +248,7 @@ Rectangle {
             visible: chip.workspaceData.codex > 0
             kind: "codex"
             count: chip.workspaceData.codex
+            awaitingInput: chip.codexAwaitsInput
             themeColors: chip.themeColors
         }
     }

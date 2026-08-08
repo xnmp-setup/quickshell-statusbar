@@ -121,6 +121,17 @@ TestCase {
     }
 
     Component {
+        id: sessionChipComponent
+
+        WorkspaceChip {
+            candidate: "segmented"
+            editing: false
+            themeColors: testCase.themeColors
+            workspaceData: testCase.agentWorkspace("working", "working")
+        }
+    }
+
+    Component {
         id: workspaceEditorRowComponent
 
         Row {
@@ -560,6 +571,46 @@ TestCase {
         compare(tip.anchorX, 12);
     }
 
+    // A workspace holding two Claude sessions and one Codex session, each in
+    // the requested run state.
+    function agentWorkspace(claudeState: string, codexState: string): var {
+        return {
+            id: 3,
+            name: "Agents",
+            monitor: "DP-1",
+            active: false,
+            claude: 2,
+            codex: 1,
+            clients: [{
+                address: "0xd", class: "ghostty", icon: "terminal",
+                label: "Ghostty", title: "repos", terminal: true, tabs: 3,
+                claude: 2, codex: 1,
+                activities: [
+                    { kind: "claude", state: claudeState, title: "statusbar" },
+                    { kind: "claude", state: "working", title: "notes" },
+                    { kind: "codex", state: codexState, title: "review" }
+                ]
+            }]
+        };
+    }
+
+    function sessionCountOf(item: var, kind: string): var {
+        const pending = [item];
+        while (pending.length > 0) {
+            const node = pending.shift();
+            if (node === null || typeof node !== "object")
+                continue;
+            if ("countColor" in node && node.kind === kind)
+                return node;
+            const children = node.data;
+            if (children === undefined || children === null)
+                continue;
+            for (let index = 0; index < children.length; index += 1)
+                pending.push(children[index]);
+        }
+        return null;
+    }
+
     function tooltipOf(item: var): var {
         for (let index = 0; index < item.data.length; index += 1) {
             const child = item.data[index];
@@ -839,11 +890,64 @@ TestCase {
         compare(workspace.surfaceColor.toString(), "#4b4840");
         compare(themed.delay, 90);
         compare(workspace.delay, 0);
-        compare(workspace.windowSummary, "1 window · 3 agents");
+        compare(workspace.windowSummary, "1 window");
+        compare(workspace.agentSummary, "3 agents");
         compare(workspace.stateLabel("working"), "Running");
         compare(workspace.stateLabel("idle"), "Idle");
         compare(workspace.stateLabel("attention"), "Awaiting input");
         compare(workspace.stateColor("attention").toString(), "#fabd2f");
+    }
+
+    function test_tooltip_agent_count_alerts_only_while_input_is_awaited(): void {
+        // The fixture workspace has a Claude session in "attention".
+        const waiting = createTemporaryObject(workspaceTooltipComponent, this);
+        verify(waiting !== null);
+        compare(waiting.agentsAwaitInput, true);
+        compare(waiting.agentSummaryColor.toString(), "#fb4934");
+
+        const busy = createTemporaryObject(workspaceTooltipComponent, this, {
+            workspaceData: testCase.agentWorkspace("working", "working")
+        });
+        verify(busy !== null);
+        compare(busy.agentsAwaitInput, false);
+        compare(busy.agentSummaryColor.toString(), "#a89984");
+    }
+
+    function test_chip_session_count_alerts_for_the_agent_that_is_waiting(): void {
+        const chip = createTemporaryObject(sessionChipComponent, this);
+        verify(chip !== null);
+        const claudeCount = sessionCountOf(chip, "claude");
+        const codexCount = sessionCountOf(chip, "codex");
+        verify(claudeCount !== null);
+        verify(codexCount !== null);
+
+        // Both agents running: each count keeps its own resting colour.
+        compare(claudeCount.countColor.toString(), "#fea45c");
+        compare(codexCount.countColor.toString(), "#ebdbb2");
+
+        // Only the waiting agent's count alerts.
+        chip.workspaceData = testCase.agentWorkspace("attention", "working");
+        compare(claudeCount.countColor.toString(), "#fb4934");
+        compare(codexCount.countColor.toString(), "#ebdbb2");
+
+        chip.workspaceData = testCase.agentWorkspace("working", "attention");
+        compare(claudeCount.countColor.toString(), "#fea45c");
+        compare(codexCount.countColor.toString(), "#fb4934");
+
+        // An idle session is not waiting on anyone.
+        chip.workspaceData = testCase.agentWorkspace("idle", "idle");
+        compare(claudeCount.countColor.toString(), "#fea45c");
+        compare(codexCount.countColor.toString(), "#ebdbb2");
+    }
+
+    function test_a_plain_process_never_counts_as_awaiting_input(): void {
+        // Only agent activities carry a run state; a process row with a
+        // forged one must not turn the counts red.
+        const workspace = testCase.agentWorkspace("working", "working");
+        workspace.clients[0].activities.push({
+            kind: "process", state: "attention", title: "rsync"
+        });
+        compare(StatusFormat.sessionsAwaitInput(workspace.clients, ""), false);
     }
 
     function test_malformed_metrics_are_bounded_before_rendering(): void {
