@@ -60,6 +60,18 @@ Scope {
         }
     }
 
+    // Saving an edit to the blocklist while Focus is on re-applies the block
+    // immediately, so a newly added site takes effect on save rather than on
+    // the next toggle. While Focus is off there is nothing to refresh.
+    FileView {
+        path: FocusState.domainsPath(Quickshell.env("HOME"))
+        watchChanges: true
+        onFileChanged: {
+            if (root.dnd)
+                Quickshell.execDetached(FocusState.blockerCommand(true));
+        }
+    }
+
     // The bar owns every toggle it makes, so polling only exists to catch
     // external changes (a keybind, makoctl in a terminal) and mako restarts.
     Timer {
