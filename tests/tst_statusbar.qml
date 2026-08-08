@@ -895,7 +895,9 @@ TestCase {
         compare(workspace.stateLabel("working"), "Running");
         compare(workspace.stateLabel("idle"), "Idle");
         compare(workspace.stateLabel("attention"), "Awaiting input");
-        compare(workspace.stateColor("attention").toString(), "#fabd2f");
+        // A waiting session is red wherever it appears: this row label and the
+        // counts on the chip.
+        compare(workspace.stateColor("attention").toString(), "#fb4934");
     }
 
     function test_tooltip_agent_count_alerts_only_while_input_is_awaited(): void {
@@ -1363,7 +1365,7 @@ TestCase {
         compare(StatusFormat.stateLabel(null), "Idle");
         compare(StatusFormat.stateLabel(undefined), "Idle");
         const theme = testCase.themeColors;
-        compare(StatusFormat.stateColor("attention", theme), "#fabd2f");
+        compare(StatusFormat.stateColor("attention", theme), "#fb4934");
         compare(StatusFormat.stateColor("working", theme), theme.accent_light);
         compare(StatusFormat.stateColor("idle", theme), theme.text_dim);
         compare(StatusFormat.stateColor("nonsense", theme), theme.text_dim);

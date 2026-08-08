@@ -92,8 +92,10 @@ function stateLabel(state) {
 }
 
 function stateColor(state, themeColors) {
+    // Same red as the counts: a session waiting on a human reads one way
+    // wherever it is shown.
     if (state === "attention")
-        return StatusSeverity.warnColor;
+        return StatusSeverity.alertColor;
     if (state === "working")
         return themeColors.accent_light;
     return themeColors.text_dim;
